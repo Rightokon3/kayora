@@ -32,6 +32,9 @@ import Animated, {
     withTiming,
     ZoomIn,
 } from "react-native-reanimated";
+import { adminApiFetch, ApiError, saveAdminSession } from "../../services/adminApi";
+import { useAdminAuth } from "../../context/AdminAuthContext";
+import { AdminRole, PERMISSIONS, Permission, hasPermission } from "../../types/adminRoles";
 
 const memoryStore = new Map<string, string>();
 
@@ -103,139 +106,24 @@ function getPalette(scheme: Scheme) {
 }
 
 const THEME_STORAGE_KEY = "kayora_admin_theme_mode";
-const REMEMBER_ME_KEY = "kayora_admin_remember_me";
-const SESSION_KEY = "kayora_admin_session";
 
 /* ============================================================
    ROLE & PERMISSION ARCHITECTURE
    ------------------------------------------------------------
-   This is the source of truth for role-based access across the
-   entire Admin Panel. Every future protected page reads
-   currentUser.role and/or hasPermission() from here. When the
-   Laravel backend is wired up, only the AdminAuth.login()
-   implementation changes — this shape stays identical.
+   Moved to ../../types/adminRoles.ts (needed there to avoid a
+   circular import with AdminAuthContext.tsx). Re-exported here so
+   any existing file already importing { AdminRole, PERMISSIONS,
+   hasPermission } from "./login" doesn't break.
 ============================================================ */
-export type AdminRole = "super_admin" | "admin";
-
-export const PERMISSIONS = {
-  MANAGE_ADMINS: "manage_admins",
-  MANAGE_ROLES: "manage_roles",
-  ACCESS_SECURITY_SETTINGS: "access_security_settings",
-  MANAGE_DRIVERS: "manage_drivers",
-  MANAGE_CUSTOMERS: "manage_customers",
-  MANAGE_ORDERS: "manage_orders",
-  MANAGE_PRODUCTS: "manage_products",
-  MANAGE_DISTRIBUTORS: "manage_distributors",
-  MANAGE_NOTIFICATIONS: "manage_notifications",
-  VIEW_ANALYTICS: "view_analytics",
-  VIEW_REPORTS: "view_reports",
-} as const;
-
-export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
-
-const ROLE_PERMISSIONS: Record<AdminRole, Permission[]> = {
-  super_admin: Object.values(PERMISSIONS),
-  admin: [
-    PERMISSIONS.MANAGE_ORDERS,
-    PERMISSIONS.MANAGE_DRIVERS,
-    PERMISSIONS.MANAGE_CUSTOMERS,
-    PERMISSIONS.MANAGE_PRODUCTS,
-    PERMISSIONS.MANAGE_DISTRIBUTORS,
-    PERMISSIONS.MANAGE_NOTIFICATIONS,
-    PERMISSIONS.VIEW_REPORTS,
-  ],
-};
-
-export function hasPermission(
-  role: AdminRole,
-  permission: Permission,
-): boolean {
-  return ROLE_PERMISSIONS[role].includes(permission);
-}
-
-/* ============================================================
-   DEMO AUTH
-============================================================ */
-interface AdminAccount {
-  employeeId: string;
-  email: string;
-  password: string;
-  role: AdminRole;
-  name: string;
-}
-
-const DEMO_ACCOUNTS: AdminAccount[] = [
-  {
-    employeeId: "SUP-0001",
-    email: "superadmin@kayora.com",
-    password: "Admin@123",
-    role: "super_admin",
-    name: "Super Administrator",
-  },
-  {
-    employeeId: "ADM-0001",
-    email: "admin@kayora.com",
-    password: "Admin@123",
-    role: "admin",
-    name: "Kayora Administrator",
-  },
-];
-
-type AdminAuthResult =
-  | {
-      success: true;
-      user: {
-        employeeId: string;
-        email: string;
-        name: string;
-        role: AdminRole;
-      };
-    }
-  | { success: false };
-
-const AdminAuth = {
-  async login(identifier: string, password: string): Promise<AdminAuthResult> {
-    // Simulate network latency until Laravel API auth replaces this.
-    await new Promise((resolve) => setTimeout(resolve, 900));
-
-    const normalized = identifier.trim().toLowerCase();
-    const match = DEMO_ACCOUNTS.find(
-      (account) =>
-        (account.employeeId.toLowerCase() === normalized ||
-          account.email.toLowerCase() === normalized) &&
-        account.password === password,
-    );
-
-    if (match) {
-      return {
-        success: true,
-        user: {
-          employeeId: match.employeeId,
-          email: match.email,
-          name: match.name,
-          role: match.role,
-        },
-      };
-    }
-    return { success: false };
-  },
-
-  async persistSession(
-    remember: boolean,
-    user: { employeeId: string; email: string; name: string; role: AdminRole },
-  ) {
-    if (remember) {
-      await safeSetItem(REMEMBER_ME_KEY, "true");
-      await safeSetItem(SESSION_KEY, JSON.stringify(user));
-    }
-  },
-};
+export type { AdminRole, Permission } from "../../types/adminRoles";
+export { PERMISSIONS, hasPermission } from "../../types/adminRoles";
 
 /* ============================================================
    MAIN COMPONENT
 ============================================================ */
 export default function AdminLoginScreen() {
   const router = useRouter();
+  const adminAuth = useAdminAuth();
 
   /* Theme */
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
@@ -294,20 +182,15 @@ export default function AdminLoginScreen() {
 
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* Auth check on mount */
+  /* Auth check on mount — reads from AdminAuthContext (which itself
+     verified the stored token isn't expired), not raw storage keys
+     directly. This avoids the exact stale-cache redirect-loop bug
+     already hit and fixed once on the driver side. */
   useEffect(() => {
-    (async () => {
-      try {
-        const remembered = await safeGetItem(REMEMBER_ME_KEY);
-        const session = await safeGetItem(SESSION_KEY);
-        if (remembered === "true" && session) {
-          router.replace("/admin/dashboard" as any);
-        }
-      } catch (e) {
-        // no stored session, remain on login
-      }
-    })();
-  }, []);
+    if (adminAuth.status === "authed") {
+      router.replace("/admin/dashboard" as any);
+    }
+  }, [adminAuth.status]);
 
   /* Entrance Animations */
   const logoOpacity = useSharedValue(0);
@@ -389,30 +272,53 @@ export default function AdminLoginScreen() {
     };
   }, []);
 
+  const [errorMessage, setErrorMessage] = useState("Invalid administrator credentials.");
+
   const handleSignIn = useCallback(async () => {
     if (loading) return;
     setShowError(false);
 
     if (!identifier.trim() || !password.trim()) {
       triggerShake();
+      setErrorMessage("Please enter your Employee ID/Email and password.");
       setShowError(true);
       resetErrorAfterDelay();
       return;
     }
 
     setLoading(true);
-    const result = await AdminAuth.login(identifier, password);
-    setLoading(false);
+    try {
+      const response = await adminApiFetch<{
+        success: true;
+        token: string;
+        expiresAt: string;
+        admin: { employeeId: string; email: string; name: string; role: AdminRole; profilePicture: string | null };
+      }>("/(auth)/login", {
+        method: "POST",
+        body: JSON.stringify({
+          identifier: identifier.trim(),
+          password,
+          remember: rememberMe,
+        }),
+      });
 
-    if (result.success) {
-      await AdminAuth.persistSession(rememberMe, result.user);
+      await saveAdminSession(response.token, response.expiresAt, response.admin);
+      // Updates AdminAuthContext synchronously — the route guard reading
+      // adminAuth.status re-renders and redirects on its own, same
+      // pattern as the driver app's signIn()/DriverGuard combo.
+      adminAuth.signIn(response.admin);
       router.replace("/admin/dashboard" as any);
-    } else {
+    } catch (err) {
       triggerShake();
+      setErrorMessage(
+        err instanceof ApiError ? err.message : "Unable to reach the server. Check your connection."
+      );
       setShowError(true);
       resetErrorAfterDelay();
+    } finally {
+      setLoading(false);
     }
-  }, [identifier, password, rememberMe, loading]);
+  }, [identifier, password, rememberMe, loading, adminAuth]);
 
   return (
     <SafeAreaView
@@ -566,7 +472,7 @@ export default function AdminLoginScreen() {
                       color={BRAND.danger}
                     />
                     <Text style={styles.errorText}>
-                      Invalid administrator credentials.
+                      {errorMessage}
                     </Text>
                   </Animated.View>
                 )}
@@ -651,61 +557,6 @@ export default function AdminLoginScreen() {
               </Animated.View>
             </Animated.View>
 
-            {/* ---------- DEMO CREDENTIALS ---------- */}
-            <Animated.View
-              style={[
-                styles.demoCard,
-                { backgroundColor: palette.card, borderColor: palette.border },
-              ]}
-            >
-              <Pressable
-                style={styles.demoHeaderRow}
-                onPress={() => setDemoCredentialsOpen((v) => !v)}
-                hitSlop={6}
-              >
-                <View style={styles.demoHeaderLeft}>
-                  <Ionicons name="key-outline" size={16} color={palette.gold} />
-                  <Text
-                    style={[styles.demoHeaderText, { color: palette.text }]}
-                  >
-                    Demo Credentials
-                  </Text>
-                </View>
-                <Ionicons
-                  name={demoCredentialsOpen ? "chevron-up" : "chevron-down"}
-                  size={18}
-                  color={palette.subtitle}
-                />
-              </Pressable>
-
-              {demoCredentialsOpen && (
-                <Animated.View
-                  entering={FadeIn.duration(220)}
-                  style={{ marginTop: 14 }}
-                >
-                  <DemoAccountBlock
-                    palette={palette}
-                    roleLabel="Super Admin"
-                    employeeId="SUP-0001"
-                    email="superadmin@kayora.com"
-                    password="Admin@123"
-                  />
-                  <View
-                    style={[
-                      styles.demoDivider,
-                      { backgroundColor: palette.border },
-                    ]}
-                  />
-                  <DemoAccountBlock
-                    palette={palette}
-                    roleLabel="Administrator"
-                    employeeId="ADM-0001"
-                    email="admin@kayora.com"
-                    password="Admin@123"
-                  />
-                </Animated.View>
-              )}
-            </Animated.View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

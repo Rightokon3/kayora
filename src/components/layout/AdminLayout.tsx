@@ -1,18 +1,13 @@
-import React, { useState, useCallback } from "react";
-import { View, ScrollView, StyleSheet } from "react-native";
+import React, { useState, useCallback, useEffect } from "react";
+import { View, ScrollView, StyleSheet, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useRouter } from "expo-router";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useResponsive } from "../../hooks/useResponsive";
+import { useAdminAuth } from "../../context/AdminAuthContext";
 import { Sidebar, AdminUser } from "../sidebar/sidebar";
 import { MobileDrawer } from "../sidebar/mobileDrawer";
 import { TopHeader } from "./TopHeader";
-
-
-const DEMO_ADMIN: AdminUser = {
-  name: "Right Uwaifo",
-  role: "admin",
-  profilePicture: null,
-};
 
 export function AdminLayout({
   title,
@@ -23,15 +18,44 @@ export function AdminLayout({
 }) {
   const { palette, themeMode, cycleTheme } = useTheme();
   const { isPhone, isDesktop } = useResponsive();
+  const { status, admin } = useAdminAuth();
+  const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
+  // The actual "nobody sees the dashboard without logging in" guard.
+  // AdminLayout wraps every admin screen (dashboard.tsx and presumably
+  // every other admin page), so putting it here means it's enforced
+  // everywhere at once rather than needing to be repeated per-screen.
+  useEffect(() => {
+    if (status === "guest") {
+      router.replace("/(admin)/login" as any);
+    }
+  }, [status]);
+
+  if (status === "checking" || status === "guest" || !admin) {
+    // "guest" still renders this briefly while the redirect above fires —
+    // showing a spinner here (instead of the real page) means the
+    // protected content never actually flashes on screen even for a frame.
+    return (
+      <SafeAreaView style={[styles.root, styles.loadingRoot, { backgroundColor: palette.background }]}>
+        <ActivityIndicator size="large" color={palette.primary} />
+      </SafeAreaView>
+    );
+  }
+
+  const currentAdmin: AdminUser = {
+    name: admin.name,
+    role: admin.role,
+    profilePicture: admin.profilePicture,
+  };
+
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.background }]} edges={["top"]}>
       <View style={styles.body}>
-        {!isPhone && <Sidebar palette={palette} user={DEMO_ADMIN} />}
+        {!isPhone && <Sidebar palette={palette} user={currentAdmin} />}
 
         <View style={{ flex: 1 }}>
           <TopHeader
@@ -39,7 +63,7 @@ export function AdminLayout({
             title={title}
             isPhone={isPhone}
             themeMode={themeMode}
-            user={DEMO_ADMIN}
+            user={currentAdmin}
             onMenuPress={openDrawer}
             onCycleTheme={cycleTheme}
           />
@@ -63,7 +87,7 @@ export function AdminLayout({
       </View>
 
       {isPhone && (
-        <MobileDrawer visible={drawerOpen} palette={palette} user={DEMO_ADMIN} onClose={closeDrawer} />
+        <MobileDrawer visible={drawerOpen} palette={palette} user={currentAdmin} onClose={closeDrawer} />
       )}
     </SafeAreaView>
   );
@@ -71,6 +95,7 @@ export function AdminLayout({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  loadingRoot: { alignItems: "center", justifyContent: "center" },
   body: { flex: 1, flexDirection: "row" },
   scrollContent: { paddingTop: 24, paddingBottom: 40 },
 });

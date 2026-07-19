@@ -70,7 +70,7 @@ export function ImageUploader({
         style={[styles.addButton, { borderColor: palette.border, backgroundColor: palette.pillBg }]}
       >
         <Ionicons name="image-outline" size={22} color={palette.primary} />
-        <Text style={[styles.addButtonText, { color: palette.text }]}>Add Product Image</Text>
+        <Text style={[styles.addButtonText, { color: palette.text }]}>Add Image</Text>
       </Pressable>
 
       {pickerOpen && (
