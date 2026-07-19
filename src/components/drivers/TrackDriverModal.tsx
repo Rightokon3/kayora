@@ -12,68 +12,12 @@ import {
 } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 import { Palette } from "../../contexts/ThemeContext";
 import { DriversService } from "../../services/drivers";
 import { Driver } from "../../types/driver";
 import { DriverAvatar } from "./DriverAvatar";
 import { DriverStatusBadge } from "./StatusBadge";
-
-/* ============================================================
-   NOTE ON MAP TECHNOLOGY
-   ------------------------------------------------------------
-   The brief asked for React Native Maps, but that library has no
-   web renderer at all, which conflicts with the "must work on
-   Android, iOS, Web, Tablets, Desktop" requirement. This uses a
-   Leaflet map inside a WebView instead — the same approach
-   already used in the Kayora Driver app's tracking modals — so
-   the map actually renders on every target platform.
-============================================================ */
-
-function buildTrackingHtml(lat: number, lng: number, isDark: boolean) {
-  const tileUrl = isDark
-    ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-    : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
-
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; background: ${isDark ? "#09090B" : "#F8FAFC"}; }
-    .leaflet-control-attribution { font-size: 9px; }
-    .kayora-vehicle-marker {
-      width: 26px; height: 26px; border-radius: 8px;
-      background: #0D4A8C; border: 3px solid #FFFFFF;
-      box-shadow: 0 0 0 5px rgba(13,74,140,0.25);
-      display: flex; align-items: center; justify-content: center;
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    var map = L.map('map', { zoomControl: false }).setView([${lat}, ${lng}], 15);
-    L.tileLayer('${tileUrl}', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
-
-    var icon = L.divIcon({ className: 'kayora-vehicle-marker', html: '🚚', iconSize: [26, 26] });
-    var marker = L.marker([${lat}, ${lng}], { icon: icon }).addTo(map);
-
-    function updateMarker(lat, lng) {
-      var newLatLng = new L.LatLng(lat, lng);
-      marker.setLatLng(newLatLng);
-      map.panTo(newLatLng, { animate: true, duration: 1 });
-    }
-    function centerMap(lat, lng) {
-      map.setView([lat, lng], 16, { animate: true });
-    }
-    true;
-  </script>
-</body>
-</html>`;
-}
+import { DriverTrackingMap, DriverTrackingMapHandle } from "./DriverTrackingMap";
 
 export function TrackDriverModal({
   visible,
@@ -86,7 +30,7 @@ export function TrackDriverModal({
   driver: Driver | null;
   onClose: () => void;
 }) {
-  const webviewRef = useRef<WebView>(null);
+  const mapRef = useRef<DriverTrackingMapHandle>(null);
   const [location, setLocation] = useState(driver?.location ?? null);
   const [mapReady, setMapReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -98,10 +42,9 @@ export function TrackDriverModal({
   }, [driver?.id]);
 
   const applyLocation = useCallback((next: Driver["location"]) => {
+    // DriverTrackingMap reacts to latitude/longitude props directly now —
+    // no injectJavaScript bridge needed like the old WebView version.
     setLocation(next);
-    webviewRef.current?.injectJavaScript(
-      `updateMarker(${next.latitude}, ${next.longitude}); true;`,
-    );
   }, []);
 
   useEffect(() => {
@@ -122,13 +65,6 @@ export function TrackDriverModal({
   if (!visible || !driver) return null;
 
   const fullName = `${driver.firstName} ${driver.lastName}`;
-  const html = location
-    ? buildTrackingHtml(
-        location.latitude,
-        location.longitude,
-        palette.scheme === "dark",
-      )
-    : "";
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -142,9 +78,7 @@ export function TrackDriverModal({
 
   const handleCenter = () => {
     if (location) {
-      webviewRef.current?.injectJavaScript(
-        `centerMap(${location.latitude}, ${location.longitude}); true;`,
-      );
+      mapRef.current?.centerOn(location.latitude, location.longitude);
     }
   };
 
@@ -191,18 +125,14 @@ export function TrackDriverModal({
         </View>
 
         <View style={[styles.mapWrap, { borderColor: palette.border }]}>
-          {html ? (
-            <View style={{ flex: 1 }}>
-              <WebView
-                ref={webviewRef}
-                originWhitelist={["*"]}
-                source={{ html }}
-                style={{ flex: 1 }}
-                onLoadEnd={() => setMapReady(true)}
-                javaScriptEnabled
-                domStorageEnabled
-              />
-            </View>
+          {location ? (
+            <DriverTrackingMap
+              ref={mapRef}
+              latitude={location.latitude}
+              longitude={location.longitude}
+              isDark={palette.scheme === "dark"}
+              onReady={() => setMapReady(true)}
+            />
           ) : null}
           {!mapReady && (
             <View
