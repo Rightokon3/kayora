@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { Palette } from "../../../contexts/ThemeContext";
 import { DriverRoadInfo } from "../../../types/driver";
 import { FormField } from "./FormField";
+import { DateField } from "./DateField";
 import { ImageUploader } from "../../products/ImageUploader";
 
 export function RoadInfoStep({
@@ -20,7 +21,7 @@ export function RoadInfoStep({
     <View style={{ gap: 16 }}>
       <View style={styles.row}>
         <FormField palette={palette} label="Driver License Number" value={value.licenseNumber} onChangeText={(t) => onChange("licenseNumber", t)} error={errors.licenseNumber} style={{ flex: 1 }} />
-        <FormField palette={palette} label="License Expiry Date" value={value.licenseExpiry} onChangeText={(t) => onChange("licenseExpiry", t)} placeholder="DD/MM/YYYY" error={errors.licenseExpiry} style={{ flex: 1 }} />
+        <DateField palette={palette} label="License Expiry Date" value={value.licenseExpiry} onChangeText={(t) => onChange("licenseExpiry", t)} error={errors.licenseExpiry} style={{ flex: 1 }} />
       </View>
 
       <View>

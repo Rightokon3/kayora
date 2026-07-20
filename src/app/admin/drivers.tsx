@@ -15,8 +15,11 @@ import { DriverCard } from "../../components/drivers/DriverCard";
 import { TrackDriverModal } from "../../components/drivers/TrackDriverModal";
 import { DeleteDriverModal } from "../../components/drivers/DeleteDriverModal";
 import { DriverFormModal } from "../../components/drivers/form/DriverFormModal";
+import { SetDriverPasswordModal } from "../../components/drivers/SetDriverPasswordModal";
 import { DriversSkeleton } from "../../components/drivers/DriversSkeleton";
 import { DriversEmptyState } from "../../components/drivers/EmptyState";
+
+const SEARCH_DEBOUNCE_MS = 350;
 
 export default function DriversScreen() {
   const { palette } = useTheme();
@@ -25,6 +28,7 @@ export default function DriversScreen() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [formVisible, setFormVisible] = useState(false);
   const [formMode, setFormMode] = useState<"add" | "edit">("add");
@@ -34,6 +38,9 @@ export default function DriversScreen() {
 
   const [deleteTarget, setDeleteTarget] = useState<Driver | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // The "set password" step shown right after a driver is created.
+  const [passwordDriver, setPasswordDriver] = useState<{ id: string; name: string } | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,33 +54,42 @@ export default function DriversScreen() {
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
-  const loadDrivers = useCallback(async () => {
+  const loadDrivers = useCallback(async (search: string) => {
     setLoading(true);
-    const data = await DriversService.getDrivers();
-    setDrivers(data);
-    setLoading(false);
-  }, []);
+    try {
+      const data = await DriversService.getDrivers(search);
+      setDrivers(data);
+    } catch (e) {
+      showToast("Could not load drivers. Please try again.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
 
   useEffect(() => {
-    loadDrivers();
-  }, [loadDrivers]);
+    loadDrivers("");
+  }, []);
 
-  const filteredDrivers = useMemo(() => {
-    const normalized = searchQuery.trim().toLowerCase();
-    if (!normalized) return drivers;
-    return drivers.filter(
-      (d) =>
-        `${d.firstName} ${d.lastName}`.toLowerCase().includes(normalized) ||
-        d.driverId.toLowerCase().includes(normalized) ||
-        d.phone.toLowerCase().includes(normalized) ||
-        d.vehicle.plateNumber.toLowerCase().includes(normalized)
-    );
-  }, [drivers, searchQuery]);
+  // Real backend search, debounced — replaces the old client-side filter.
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        loadDrivers(text);
+      }, SEARCH_DEBOUNCE_MS);
+    },
+    [loadDrivers]
+  );
 
-  const activeCount = useMemo(() => drivers.filter((d) => d.status === "active" || d.status === "delivering").length, [drivers]);
+  const activeCount = useMemo(
+    () => drivers.filter((d) => d.status === "active" || d.status === "delivering").length,
+    [drivers]
+  );
 
   const handleOpenAdd = useCallback(() => {
     setFormMode("add");
@@ -91,22 +107,44 @@ export default function DriversScreen() {
     async (input: DriverFormInput) => {
       try {
         if (formMode === "add") {
-          await DriversService.createDriver(input);
+          const created = await DriversService.createDriver(input);
           showToast("Driver created successfully.", "success");
+          setFormVisible(false);
+          // Open the password step right after — driver isn't usable until
+          // a real password replaces the random one set at creation.
+          setPasswordDriver({ id: created.id, name: `${created.firstName} ${created.lastName}`.trim() || created.driverId });
         } else if (activeDriver) {
           await DriversService.updateDriver(activeDriver.id, input);
           showToast("Driver updated successfully.", "success");
+          setFormVisible(false);
         }
-        setFormVisible(false);
-        await loadDrivers();
+        await loadDrivers(searchQuery);
       } catch (e) {
         showToast("Something went wrong. Please try again.", "error");
       }
     },
-    [formMode, activeDriver, loadDrivers, showToast]
+    [formMode, activeDriver, loadDrivers, searchQuery, showToast]
   );
 
-  const handleTrack = useCallback((driver: Driver) => setTrackingDriver(driver), []);
+  const handleSetPassword = useCallback(
+    async (password: string, confirmPassword: string): Promise<boolean> => {
+      if (!passwordDriver) return false;
+      try {
+        await DriversService.setPassword(passwordDriver.id, password, confirmPassword);
+        showToast("Driver password set successfully.", "success");
+        setPasswordDriver(null);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+    [passwordDriver, showToast]
+  );
+
+  const handleTrack = useCallback((driver: Driver) => {
+    if (driver.status === "offline") return; // Track button is disabled for offline drivers, this is a backstop
+    setTrackingDriver(driver);
+  }, []);
 
   const handleRequestDelete = useCallback((driver: Driver) => setDeleteTarget(driver), []);
 
@@ -117,13 +155,13 @@ export default function DriversScreen() {
       await DriversService.deleteDriver(deleteTarget.id);
       showToast("Driver deleted successfully", "success");
       setDeleteTarget(null);
-      await loadDrivers();
+      await loadDrivers(searchQuery);
     } catch (e) {
       showToast("Could not delete driver. Please try again.", "error");
     } finally {
       setDeleting(false);
     }
-  }, [deleteTarget, loadDrivers, showToast]);
+  }, [deleteTarget, loadDrivers, searchQuery, showToast]);
 
   return (
     <AdminLayout title="Drivers">
@@ -135,7 +173,7 @@ export default function DriversScreen() {
           </View>
           <View style={[styles.headerActions, isPhone && { width: "100%", marginTop: 16, flexDirection: "column", alignItems: "stretch" }]}>
             <View style={[styles.searchWrap, isPhone && { width: "100%" }]}>
-              <SearchBar palette={palette} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search drivers..." />
+              <SearchBar palette={palette} value={searchQuery} onChangeText={handleSearchChange} placeholder="Search drivers..." />
             </View>
             <Pressable
               onPress={handleOpenAdd}
@@ -159,11 +197,11 @@ export default function DriversScreen() {
           <View style={{ marginTop: 18 }}>
             {loading ? (
               <DriversSkeleton palette={palette} rows={4} />
-            ) : filteredDrivers.length === 0 ? (
+            ) : drivers.length === 0 ? (
               <DriversEmptyState palette={palette} isSearch={searchQuery.trim().length > 0} />
             ) : isPhone ? (
               <View style={{ gap: 14 }}>
-                {filteredDrivers.map((driver, index) => (
+                {drivers.map((driver, index) => (
                   <DriverCard
                     key={driver.id}
                     driver={driver}
@@ -178,7 +216,7 @@ export default function DriversScreen() {
             ) : (
               <DriverTable
                 palette={palette}
-                drivers={filteredDrivers}
+                drivers={drivers}
                 onTrack={handleTrack}
                 onEdit={handleOpenEdit}
                 onDelete={handleRequestDelete}
@@ -195,6 +233,14 @@ export default function DriversScreen() {
         initialDriver={activeDriver}
         onClose={() => setFormVisible(false)}
         onSubmit={handleSubmitForm}
+      />
+
+      <SetDriverPasswordModal
+        visible={!!passwordDriver}
+        palette={palette}
+        driverName={passwordDriver?.name ?? ""}
+        onSubmit={handleSetPassword}
+        onSkip={() => setPasswordDriver(null)}
       />
 
       <TrackDriverModal visible={!!trackingDriver} palette={palette} driver={trackingDriver} onClose={() => setTrackingDriver(null)} />

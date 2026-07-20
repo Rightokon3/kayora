@@ -92,10 +92,17 @@ export async function getStoredAdminUser(): Promise<{
 export async function adminApiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await storage.getItem(TOKEN_KEY);
 
+  // FormData (file uploads) must NOT have a manual Content-Type — the
+  // browser/RN needs to set its own multipart boundary. Forcing
+  // "application/json" here, as this function did before, silently broke
+  // every multipart upload (Cloudinary would receive a body it couldn't
+  // parse as an image at all).
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       Accept: "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,

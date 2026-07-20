@@ -1,6 +1,7 @@
 import React from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import Animated, { ZoomIn } from "react-native-reanimated";
 import { Palette } from "../../contexts/ThemeContext";
 
@@ -22,45 +23,42 @@ export function DeleteConfirmDialog({
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay}>
-      <Animated.View entering={ZoomIn.duration(220)} style={[styles.card, { backgroundColor: palette.card }]}>
-        <View style={[styles.iconCircle, { backgroundColor: palette.danger + "1A" }]}>
-          <Ionicons name="trash-outline" size={24} color={palette.danger} />
+    <Modal visible animationType="fade" transparent onRequestClose={onCancel}>
+      <BlurView intensity={35} tint={palette.scheme === "dark" ? "dark" : "light"} style={StyleSheet.absoluteFill}>
+        <View style={styles.overlay}>
+          <Animated.View entering={ZoomIn.duration(220)} style={[styles.card, { backgroundColor: palette.card }]}>
+            <View style={[styles.iconCircle, { backgroundColor: palette.danger + "1A" }]}>
+              <Ionicons name="trash-outline" size={24} color={palette.danger} />
+            </View>
+            <Text style={[styles.title, { color: palette.text }]}>Delete Product?</Text>
+            <Text style={[styles.message, { color: palette.muted }]}>
+              "{productName}" will be permanently removed from the marketplace.
+            </Text>
+            <View style={styles.buttonsRow}>
+              <Pressable
+                onPress={onCancel}
+                disabled={loading}
+                style={[styles.cancelButton, { borderColor: palette.border }]}
+              >
+                <Text style={[styles.cancelButtonText, { color: palette.text }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={onConfirm}
+                disabled={loading}
+                style={[styles.deleteButton, { backgroundColor: palette.danger }]}
+              >
+                {loading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.deleteButtonText}>Delete</Text>}
+              </Pressable>
+            </View>
+          </Animated.View>
         </View>
-        <Text style={[styles.title, { color: palette.text }]}>Delete Product?</Text>
-        <Text style={[styles.message, { color: palette.muted }]}>
-          "{productName}" will be permanently removed from the marketplace.
-        </Text>
-        <View style={styles.buttonsRow}>
-          <Pressable
-            onPress={onCancel}
-            disabled={loading}
-            style={[styles.cancelButton, { borderColor: palette.border }]}
-          >
-            <Text style={[styles.cancelButtonText, { color: palette.text }]}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            onPress={onConfirm}
-            disabled={loading}
-            style={[styles.deleteButton, { backgroundColor: palette.danger }]}
-          >
-            {loading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.deleteButtonText}>Delete</Text>}
-          </Pressable>
-        </View>
-      </Animated.View>
-    </View>
+      </BlurView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 32,
-    zIndex: 90,
-  },
+  overlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 },
   card: { width: "100%", maxWidth: 340, borderRadius: 22, padding: 24, alignItems: "center" },
   iconCircle: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", marginBottom: 14 },
   title: { fontSize: 17, fontWeight: "800", marginBottom: 8 },

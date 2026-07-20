@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -17,6 +17,8 @@ import { ProductsSkeleton } from "../../components/products/ProductsSkeleton";
 import { ProductsEmptyState } from "../../components/products/EmptyState";
 import { Toast, ToastState } from "../../components/products/Toast";
 
+const SEARCH_DEBOUNCE_MS = 350;
+
 export default function ProductsScreen() {
   const { palette } = useTheme();
   const { isPhone } = useResponsive();
@@ -24,6 +26,7 @@ export default function ProductsScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState<"add" | "edit">("add");
@@ -35,7 +38,7 @@ export default function ProductsScreen() {
   const [previewUri, setPreviewUri] = useState<string | null | undefined>(undefined);
 
   const [toast, setToast] = useState<ToastState | null>(null);
-  const toastTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((message: string, variant: "success" | "error" = "success") => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -46,33 +49,37 @@ export default function ProductsScreen() {
   useEffect(() => {
     return () => {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (search: string) => {
     setLoading(true);
-    const data = await ProductService.getProducts();
-    setProducts(data);
-    setLoading(false);
-  }, []);
+    try {
+      const data = await ProductService.getProducts(search);
+      setProducts(data);
+    } catch (e) {
+      showToast("Could not load products. Please try again.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
 
   useEffect(() => {
-    loadProducts();
-  }, [loadProducts]);
+    loadProducts("");
+  }, []);
 
-  // Real-time client-side filtering as the admin types. Query shape is kept
-  // identical to what ProductService.searchProducts already accepts, so
-  // swapping this for a debounced server-side search later is a small change.
-  const filteredProducts = useMemo(() => {
-    const normalized = searchQuery.trim().toLowerCase();
-    if (!normalized) return products;
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(normalized) ||
-        p.size.toLowerCase().includes(normalized) ||
-        p.status.toLowerCase().includes(normalized)
-    );
-  }, [products, searchQuery]);
+  // Real backend search, debounced — replaces the old client-side filter.
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        loadProducts(text);
+      }, SEARCH_DEBOUNCE_MS);
+    },
+    [loadProducts]
+  );
 
   const handleOpenAdd = useCallback(() => {
     setModalMode("add");
@@ -99,12 +106,12 @@ export default function ProductsScreen() {
           showToast("Product updated successfully", "success");
         }
         setModalVisible(false);
-        await loadProducts();
+        await loadProducts(searchQuery);
       } catch (e) {
         showToast("Something went wrong. Please try again.", "error");
       }
     },
-    [modalMode, activeProduct, loadProducts, showToast]
+    [modalMode, activeProduct, loadProducts, searchQuery, showToast]
   );
 
   const handleRequestDelete = useCallback((product: Product) => setDeleteTarget(product), []);
@@ -116,13 +123,13 @@ export default function ProductsScreen() {
       await ProductService.deleteProduct(deleteTarget.id);
       showToast("Product deleted successfully", "success");
       setDeleteTarget(null);
-      await loadProducts();
+      await loadProducts(searchQuery);
     } catch (e) {
       showToast("Could not delete product. Please try again.", "error");
     } finally {
       setDeleting(false);
     }
-  }, [deleteTarget, loadProducts, showToast]);
+  }, [deleteTarget, loadProducts, searchQuery, showToast]);
 
   return (
     <AdminLayout title="Marketplace Products">
@@ -134,7 +141,7 @@ export default function ProductsScreen() {
 
         <View style={[styles.toolbarRow, isPhone && { flexDirection: "column", alignItems: "stretch" }]}>
           <View style={{ flex: 1 }}>
-            <SearchBar palette={palette} value={searchQuery} onChangeText={setSearchQuery} />
+            <SearchBar palette={palette} value={searchQuery} onChangeText={handleSearchChange} />
           </View>
           <Pressable
             onPress={handleOpenAdd}
@@ -157,11 +164,11 @@ export default function ProductsScreen() {
           <View style={{ marginTop: 18 }}>
             {loading ? (
               <ProductsSkeleton palette={palette} rows={4} />
-            ) : filteredProducts.length === 0 ? (
+            ) : products.length === 0 ? (
               <ProductsEmptyState palette={palette} isSearch={searchQuery.trim().length > 0} />
             ) : isPhone ? (
               <View style={{ gap: 14 }}>
-                {filteredProducts.map((product, index) => (
+                {products.map((product, index) => (
                   <ProductCard
                     key={product.id}
                     product={product}
@@ -176,7 +183,7 @@ export default function ProductsScreen() {
             ) : (
               <ProductTable
                 palette={palette}
-                products={filteredProducts}
+                products={products}
                 onEdit={handleOpenEdit}
                 onDelete={handleRequestDelete}
                 onPreviewImage={setPreviewUri}

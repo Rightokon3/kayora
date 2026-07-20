@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { Palette } from "../../../contexts/ThemeContext";
 import { DriverPersonalInfo, GENDERS, MARITAL_STATUSES } from "../../../types/driver";
 import { FormField } from "./FormField";
+import { DateField } from "./DateField";
 import { SelectField } from "../../products/SelectField";
 import { ImageUploader } from "../../products/ImageUploader";
 
@@ -33,7 +34,7 @@ export function PersonalInfoStep({
           <Text style={[styles.fieldLabel, { color: palette.text }]}>Gender</Text>
           <SelectField palette={palette} label="Gender" value={value.gender} options={GENDERS} onSelect={(v) => onChange("gender", v as any)} />
         </View>
-        <FormField palette={palette} label="Date of Birth" value={value.dateOfBirth} onChangeText={(t) => onChange("dateOfBirth", t)} placeholder="DD/MM/YYYY" error={errors.dateOfBirth} style={{ flex: 1 }} />
+        <DateField palette={palette} label="Date of Birth" value={value.dateOfBirth} onChangeText={(t) => onChange("dateOfBirth", t)} error={errors.dateOfBirth} style={{ flex: 1 }} />
       </View>
 
       <View>

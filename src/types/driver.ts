@@ -1,8 +1,54 @@
-
-
 export type DriverStatus = "active" | "offline" | "break" | "delivering";
-export type MaritalStatus = "Single" | "Married" | "Divorced" | "Widowed";
-export type Gender = "Male" | "Female";
+
+/**
+ * "break" has no backing data anywhere in the schema (drivers.duty_status
+ * is only ever on_duty/off_duty) — the backend never emits it. It stays
+ * in this union only because StatusBadge.tsx already has a color/label
+ * defined for it.
+ */
+
+export const GENDERS = ["Male", "Female"] as const;
+export const MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed"] as const;
+
+export interface DriverLocation {
+  latitude: number;
+  longitude: number;
+  speed: number;
+  updatedAt: string;
+}
+
+export interface DriverVehicleSummary {
+  vehicleId: string;
+  brand: string;
+  model: string;
+  plateNumber: string;
+}
+
+/** Pre-fills the edit form — absent (undefined) for a driver with no driver_profiles row yet. */
+export interface DriverProfileDetails {
+  middleName: string;
+  gender: string;
+  dateOfBirth: string;
+  maritalStatus: string;
+  alternativePhone: string;
+  homeAddress: string;
+  city: string;
+  state: string;
+  emergencyContactName: string;
+  emergencyContactPhone: string;
+}
+
+export interface DriverRoadDetails {
+  licenseNumber: string;
+  licenseExpiry: string;
+  licenseFrontImage: string | null;
+  licenseBackImage: string | null;
+  nationalIdNumber: string;
+  nationalIdImage: string | null;
+  yearsOfExperience: string;
+  previousEmployer: string;
+  additionalNotes: string;
+}
 
 export interface Driver {
   id: string;
@@ -11,35 +57,24 @@ export interface Driver {
   lastName: string;
   email: string;
   phone: string;
-  profileImage?: string;
+  profileImage: string | null;
   status: DriverStatus;
-  vehicle: {
-    vehicleId: string; // reference back into the Vehicle catalog
-    brand: string;
-    model: string;
-    plateNumber: string;
-    engineNumber: string;
-    chassisNumber: string;
-    image?: string;
-  };
-  location: {
-    latitude: number;
-    longitude: number;
-    speed: number;
-    updatedAt: string;
-  };
+  vehicle: DriverVehicleSummary;
+  location: DriverLocation | null;
+  profileDetails?: DriverProfileDetails;
+  roadDetails?: DriverRoadDetails;
 }
 
 /* ============================================================
-   ADD / EDIT WIZARD FORM SHAPE
+   FORM INPUT — shape sent to POST/PUT /admin/drivers
 ============================================================ */
 export interface DriverPersonalInfo {
   firstName: string;
   lastName: string;
   middleName: string;
-  gender: Gender | "";
+  gender: string;
   dateOfBirth: string;
-  maritalStatus: MaritalStatus | "";
+  maritalStatus: string;
   email: string;
   phone: string;
   alternativePhone: string;
@@ -51,8 +86,8 @@ export interface DriverPersonalInfo {
   profileImage: string | null;
 }
 
-export interface DriverVehicleAssignment {
-  vehicleId: string; // id of the selected Vehicle from the catalog, "" if none chosen yet
+export interface DriverVehicleSelection {
+  vehicleId: string;
 }
 
 export interface DriverRoadInfo {
@@ -69,7 +104,7 @@ export interface DriverRoadInfo {
 
 export interface DriverFormInput {
   personal: DriverPersonalInfo;
-  vehicle: DriverVehicleAssignment;
+  vehicle: DriverVehicleSelection;
   road: DriverRoadInfo;
 }
 
@@ -91,9 +126,7 @@ export const EMPTY_DRIVER_FORM: DriverFormInput = {
     emergencyContactPhone: "",
     profileImage: null,
   },
-  vehicle: {
-    vehicleId: "",
-  },
+  vehicle: { vehicleId: "" },
   road: {
     licenseNumber: "",
     licenseExpiry: "",
@@ -106,6 +139,3 @@ export const EMPTY_DRIVER_FORM: DriverFormInput = {
     additionalNotes: "",
   },
 };
-
-export const GENDERS: Gender[] = ["Male", "Female"];
-export const MARITAL_STATUSES: MaritalStatus[] = ["Single", "Married", "Divorced", "Widowed"];

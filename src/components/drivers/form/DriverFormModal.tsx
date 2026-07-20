@@ -23,9 +23,18 @@ import { VehicleStep } from "./VehicleStep";
 import { RoadInfoStep } from "./RoadInfoStep";
 import { ReviewStep } from "./ReviewStep";
 
+/**
+ * IMPORTANT FIX: this used to only map firstName/lastName/email/phone/
+ * profileImage/vehicleId into the edit form — every other field
+ * (middleName, gender, dob, maritalStatus, alternativePhone, address,
+ * emergency contact, and ALL of Road Info) was silently reset to blank
+ * every time an existing driver was edited. Since the form always submits
+ * every field, saving an edit would have wiped out that driver's real
+ * driver_profiles data. Now pulls from driver.profileDetails/roadDetails
+ * (populated by DriverController::transform() on the backend) instead.
+ */
 function driverToForm(driver: Driver): DriverFormInput {
   return {
-    ...EMPTY_DRIVER_FORM,
     personal: {
       ...EMPTY_DRIVER_FORM.personal,
       firstName: driver.firstName,
@@ -33,9 +42,31 @@ function driverToForm(driver: Driver): DriverFormInput {
       email: driver.email,
       phone: driver.phone,
       profileImage: driver.profileImage ?? null,
+      middleName: driver.profileDetails?.middleName ?? "",
+      gender: driver.profileDetails?.gender ?? "",
+      dateOfBirth: driver.profileDetails?.dateOfBirth ?? "",
+      maritalStatus: driver.profileDetails?.maritalStatus ?? "",
+      alternativePhone: driver.profileDetails?.alternativePhone ?? "",
+      homeAddress: driver.profileDetails?.homeAddress ?? "",
+      city: driver.profileDetails?.city ?? "",
+      state: driver.profileDetails?.state ?? "",
+      emergencyContactName: driver.profileDetails?.emergencyContactName ?? "",
+      emergencyContactPhone: driver.profileDetails?.emergencyContactPhone ?? "",
     },
     vehicle: {
       vehicleId: driver.vehicle.vehicleId,
+    },
+    road: {
+      ...EMPTY_DRIVER_FORM.road,
+      licenseNumber: driver.roadDetails?.licenseNumber ?? "",
+      licenseExpiry: driver.roadDetails?.licenseExpiry ?? "",
+      licenseFrontImage: driver.roadDetails?.licenseFrontImage ?? null,
+      licenseBackImage: driver.roadDetails?.licenseBackImage ?? null,
+      nationalIdNumber: driver.roadDetails?.nationalIdNumber ?? "",
+      nationalIdImage: driver.roadDetails?.nationalIdImage ?? null,
+      yearsOfExperience: driver.roadDetails?.yearsOfExperience ?? "",
+      previousEmployer: driver.roadDetails?.previousEmployer ?? "",
+      additionalNotes: driver.roadDetails?.additionalNotes ?? "",
     },
   };
 }
@@ -57,14 +88,12 @@ export function DriverFormModal({
 }) {
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<DriverFormInput>(EMPTY_DRIVER_FORM);
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
 
   useEffect(() => {
     if (visible) {
       setStep(0);
-      setErrors({});
       setSelectedVehicle(null);
       setForm(mode === "edit" && initialDriver ? driverToForm(initialDriver) : EMPTY_DRIVER_FORM);
     }
@@ -97,28 +126,11 @@ export function DriverFormModal({
     setForm((prev) => ({ ...prev, road: { ...prev.road, [key]: val } }));
   }, []);
 
-  const validateStep = (targetStep: number): boolean => {
-    const nextErrors: Record<string, string> = {};
-    if (targetStep === 0) {
-      if (!form.personal.firstName.trim()) nextErrors.firstName = "First name is required.";
-      if (!form.personal.lastName.trim()) nextErrors.lastName = "Last name is required.";
-      if (!form.personal.email.trim()) nextErrors.email = "Email is required.";
-      if (!form.personal.phone.trim()) nextErrors.phone = "Phone number is required.";
-      if (!form.personal.homeAddress.trim()) nextErrors.homeAddress = "Home address is required.";
-    } else if (targetStep === 1) {
-      if (!form.vehicle.vehicleId) nextErrors.vehicleId = "Please select a vehicle to assign.";
-    } else if (targetStep === 2) {
-      if (!form.road.licenseNumber.trim()) nextErrors.licenseNumber = "License number is required.";
-      if (!form.road.licenseExpiry.trim()) nextErrors.licenseExpiry = "License expiry date is required.";
-      if (!form.road.nationalIdNumber.trim()) nextErrors.nationalIdNumber = "National ID number is required.";
-    }
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
+  // No field in this form is required — every step can be skipped/left
+  // blank and the admin can still move forward and submit.
+  const emptyErrors: Record<string, string> = {};
 
   const handleNext = () => {
-    if (!validateStep(step)) return;
-    setErrors({});
     setStep((s) => Math.min(s + 1, 3));
   };
 
@@ -127,7 +139,6 @@ export function DriverFormModal({
       onClose();
       return;
     }
-    setErrors({});
     setStep((s) => Math.max(s - 1, 0));
   };
 
@@ -169,19 +180,18 @@ export function DriverFormModal({
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
               <Animated.View key={step} entering={FadeIn.duration(220)}>
                 {step === 0 && (
-                  <PersonalInfoStep palette={palette} value={form.personal} errors={errors} onChange={updatePersonal} />
+                  <PersonalInfoStep palette={palette} value={form.personal} errors={emptyErrors} onChange={updatePersonal} />
                 )}
                 {step === 1 && (
                   <VehicleStep
                     palette={palette}
                     selectedVehicleId={form.vehicle.vehicleId}
                     currentDriverId={mode === "edit" ? initialDriver?.id : undefined}
-                    error={errors.vehicleId}
                     onSelect={handleSelectVehicle}
                   />
                 )}
                 {step === 2 && (
-                  <RoadInfoStep palette={palette} value={form.road} errors={errors} onChange={updateRoad} />
+                  <RoadInfoStep palette={palette} value={form.road} errors={emptyErrors} onChange={updateRoad} />
                 )}
                 {step === 3 && <ReviewStep palette={palette} value={form} selectedVehicle={selectedVehicle} />}
               </Animated.View>

@@ -46,7 +46,15 @@ function DriverCardBase({
       <InfoRow icon="car-sport-outline" text={`${driver.vehicle.brand} ${driver.vehicle.model} · ${driver.vehicle.plateNumber}`} palette={palette} />
 
       <View style={styles.actionsRow}>
-        <Pressable onPress={() => onTrack(driver)} style={[styles.actionButton, { borderColor: palette.border }]}>
+        <Pressable
+          onPress={() => driver.status !== "offline" && onTrack(driver)}
+          disabled={driver.status === "offline"}
+          style={[
+            styles.actionButton,
+            { borderColor: palette.border },
+            driver.status === "offline" && { opacity: 0.4 },
+          ]}
+        >
           <Ionicons name="location-outline" size={15} color={palette.secondary} />
           <Text style={[styles.actionText, { color: palette.secondary }]}>Track</Text>
         </Pressable>
