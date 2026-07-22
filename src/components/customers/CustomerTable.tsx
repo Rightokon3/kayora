@@ -10,7 +10,7 @@ const COLUMN_WIDTHS = {
   contact: 210,
   address: 240,
   joined: 130,
-  actions: 100,
+  actions: 140,
 };
 
 function formatJoinedDate(iso: string): string {
@@ -25,10 +25,12 @@ function CustomerTableBase({
   palette,
   customers,
   onDelete,
+  onDistributorPress,
 }: {
   palette: Palette;
   customers: Customer[];
   onDelete: (customer: Customer) => void;
+  onDistributorPress: (customer: Customer) => void;
 }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -144,7 +146,38 @@ function CustomerTableBase({
               {formatJoinedDate(customer.joinedAt)}
             </Text>
 
-            <View style={{ width: COLUMN_WIDTHS.actions }}>
+            <View
+              style={{
+                width: COLUMN_WIDTHS.actions,
+                flexDirection: "row",
+                gap: 8,
+              }}
+            >
+              {customer.distributorApplication && (
+                <Pressable
+                  onPress={() => onDistributorPress(customer)}
+                  style={[
+                    styles.deleteButton,
+                    {
+                      borderColor:
+                        customer.distributorApplication.status === "pending"
+                          ? palette.danger + "40"
+                          : palette.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="business-outline"
+                    size={16}
+                    color={
+                      customer.distributorApplication.status === "pending"
+                        ? palette.danger
+                        : palette.muted
+                    }
+                  />
+                </Pressable>
+              )}
+
               <Pressable
                 onPress={() => onDelete(customer)}
                 style={[

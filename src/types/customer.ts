@@ -48,3 +48,39 @@ export interface AccountInactivationRequest {
   created_at: string | null;
   updated_at: string | null;
 }
+export interface Customer {
+  id: string;
+  userId: number;
+  name: string;
+  email: string;
+  phone: string;
+  profilePicture: string | null;
+  address: CustomerAddress;
+  joinedAt: string;
+  isDistributor: boolean;
+  distributorApplication: DistributorApplication | null;
+}
+
+/**
+ * Mirrors distributor_applications columns (camelCased on the way out
+ * of CustomerController::index and DistributorApplicationController::show).
+ * `status` flips to "approved"/"rejected" once an admin acts on it; the
+ * user's own `isDistributor` flag only becomes true on approval.
+ */
+export interface DistributorApplication {
+  id: number;
+  status: "pending" | "approved" | "rejected";
+  businessName: string;
+  fullName?: string;
+  businessType?: string;
+  city?: string;
+  lga?: string;
+  state?: string;
+  phone?: string;
+  whatsapp?: string;
+  email?: string;
+  estimatedMonthlyVolume?: string;
+  yearsInBusiness?: string;
+  additionalInfo?: string;
+  submittedAt?: string;
+}

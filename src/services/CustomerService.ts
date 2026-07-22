@@ -1,5 +1,5 @@
 import { adminApiFetch } from "./adminApi";
-import { Customer, AccountInactivationRequest } from "../types/customer";
+import { Customer, AccountInactivationRequest, DistributorApplication } from "../types/customer";
 
 /* ============================================================
    CUSTOMER SERVICE
@@ -9,6 +9,9 @@ import { Customer, AccountInactivationRequest } from "../types/customer";
      DELETE /admin/customers/{userId}
      GET    /admin/customers/inactivation-requests
      DELETE /admin/customers/inactivation-requests/{id}
+     GET    /admin/distributor-applications/{id}
+     POST   /admin/distributor-applications/{id}/approve
+     POST   /admin/distributor-applications/{id}/deny
 ============================================================ */
 
 export const CustomerService = {
@@ -29,5 +32,21 @@ export const CustomerService = {
   /** Deletes the requesting customer's account and clears the request. */
   async resolveInactivationRequest(id: number): Promise<void> {
     await adminApiFetch(`/admin/customers/inactivation-requests/${id}`, { method: "DELETE" });
+  },
+
+  /** Full column set for the distributor-application modal — the
+   *  customers list endpoint only embeds a summary per row. */
+  async getDistributorApplication(id: number): Promise<DistributorApplication> {
+    return adminApiFetch<DistributorApplication>(`/admin/distributor-applications/${id}`);
+  },
+
+  /** Flips the underlying user to a distributor on the backend. */
+  async approveDistributorApplication(id: number): Promise<void> {
+    await adminApiFetch(`/admin/distributor-applications/${id}/approve`, { method: "POST" });
+  },
+
+  /** Rejects the application; the user stays a normal customer. */
+  async denyDistributorApplication(id: number): Promise<void> {
+    await adminApiFetch(`/admin/distributor-applications/${id}/deny`, { method: "POST" });
   },
 };

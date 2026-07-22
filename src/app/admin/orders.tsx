@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { View, Text, RefreshControl, StyleSheet } from "react-native";
+import { View, Text, RefreshControl, Pressable, Platform, StyleSheet } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { AdminLayout } from "../../components/layout/AdminLayout";
 import { useTheme } from "../../contexts/ThemeContext";
@@ -21,6 +22,17 @@ import { OrdersSkeleton } from "../../components/orders/OrderSkeleton";
 import { OrdersEmptyState } from "../../components/orders/EmptyState";
 
 const PAGE_SIZE = 10;
+const SEARCH_DEBOUNCE_MS = 350;
+
+type DeliveryTypeFilter = "all" | "asap" | "scheduled";
+
+/** todayString() — used as the default upper bound reference for the calendar filter. */
+function todayString(): string {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
 
 export default function OrdersScreen() {
   const { palette } = useTheme();
@@ -34,7 +46,11 @@ export default function OrdersScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [activeTab, setActiveTab] = useState<OrderTab>("all");
+  const [deliveryTypeFilter, setDeliveryTypeFilter] = useState<DeliveryTypeFilter>("all");
+  const [dateFilter, setDateFilter] = useState<string>(""); // "" = no calendar filter applied
   const [page, setPage] = useState(1);
+
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
   const [assignOrder, setAssignOrder] = useState<Order | null>(null);
@@ -44,7 +60,6 @@ export default function OrdersScreen() {
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((message: string, variant: "success" | "error" = "success") => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -59,22 +74,41 @@ export default function OrdersScreen() {
     };
   }, []);
 
+  // Real backend fetch — search, status, delivery type, and calendar date
+  // all become actual query params, not client-side array filtering.
   const loadOrders = useCallback(async () => {
     setErrorMessage(null);
     try {
-      const data = await OrdersService.getOrders();
+      const data = await OrdersService.getOrders({
+        search: searchQuery,
+        status: statusFilter,
+        deliveryType: deliveryTypeFilter === "all" ? undefined : deliveryTypeFilter,
+        date: dateFilter || undefined,
+      });
       setOrders(data);
     } catch (e) {
       setErrorMessage("Could not load orders. Pull to refresh and try again.");
     }
-  }, []);
+  }, [searchQuery, statusFilter, deliveryTypeFilter, dateFilter]);
 
+  // Initial load + reload whenever status/deliveryType/date change (these
+  // don't need debouncing — only free-text search does).
   useEffect(() => {
     (async () => {
       setLoading(true);
       await loadOrders();
       setLoading(false);
     })();
+  }, [statusFilter, deliveryTypeFilter, dateFilter]);
+
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchQuery(text);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      await loadOrders();
+      setLoading(false);
+    }, SEARCH_DEBOUNCE_MS);
   }, [loadOrders]);
 
   const handleRefresh = useCallback(async () => {
@@ -83,44 +117,22 @@ export default function OrdersScreen() {
     setRefreshing(false);
   }, [loadOrders]);
 
-  // Debounced real-time search — GET /orders/search?q= is the eventual
-  // backend target; for now this just filters the in-memory list.
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => setDebouncedQuery(searchQuery), 300);
-  }, [searchQuery]);
-
-  const filteredOrders = useMemo(() => {
-    let list = orders;
-
-    if (activeTab === "pending") list = list.filter((o) => o.status === "Pending");
-    else if (activeTab === "in_progress") list = list.filter((o) => IN_PROGRESS_STATUSES.includes(o.status));
-    else if (activeTab === "completed") list = list.filter((o) => COMPLETED_STATUSES.includes(o.status));
-
-    if (statusFilter !== "all") list = list.filter((o) => o.status === statusFilter);
-
-    const normalized = debouncedQuery.trim().toLowerCase();
-    if (normalized) {
-      list = list.filter(
-        (o) =>
-          o.id.toLowerCase().includes(normalized) ||
-          o.customer.name.toLowerCase().includes(normalized) ||
-          o.customer.phone.toLowerCase().includes(normalized) ||
-          o.customer.deliveryAddress.toLowerCase().includes(normalized) ||
-          o.products.some((p) => p.bottleName.toLowerCase().includes(normalized) || p.size.toLowerCase().includes(normalized))
-      );
-    }
-
-    return list;
-  }, [orders, activeTab, statusFilter, debouncedQuery]);
+  // Tabs still bucket client-side, since the backend already returns
+  // everything matching search/status/deliveryType/date — the tab is just
+  // a further split of that same result set by status group.
+  const tabbedOrders = useMemo(() => {
+    if (activeTab === "pending") return orders.filter((o) => o.status === "Pending");
+    if (activeTab === "in_progress") return orders.filter((o) => IN_PROGRESS_STATUSES.includes(o.status));
+    if (activeTab === "completed") return orders.filter((o) => COMPLETED_STATUSES.includes(o.status));
+    return orders;
+  }, [orders, activeTab]);
 
   useEffect(() => {
     setPage(1);
-  }, [activeTab, statusFilter, debouncedQuery]);
+  }, [activeTab, statusFilter, deliveryTypeFilter, dateFilter, searchQuery]);
 
-  const pagedOrders = useMemo(() => filteredOrders.slice(0, page * PAGE_SIZE), [filteredOrders, page]);
-  const hasMore = pagedOrders.length < filteredOrders.length;
+  const pagedOrders = useMemo(() => tabbedOrders.slice(0, page * PAGE_SIZE), [tabbedOrders, page]);
+  const hasMore = pagedOrders.length < tabbedOrders.length;
 
   const stats = useMemo(
     () => ({
@@ -180,7 +192,8 @@ export default function OrdersScreen() {
     }
   }, [deleteOrder, showToast]);
 
-  const isFilteredEmpty = debouncedQuery.trim().length > 0 || statusFilter !== "all" || activeTab !== "all";
+  const isFilteredEmpty =
+    searchQuery.trim().length > 0 || statusFilter !== "all" || activeTab !== "all" || deliveryTypeFilter !== "all" || !!dateFilter;
 
   return (
     <AdminLayout
@@ -194,12 +207,75 @@ export default function OrdersScreen() {
         </View>
         <View style={[styles.headerActions, isPhone && { width: "100%", marginTop: 16, flexDirection: "column", alignItems: "stretch" }]}>
           <View style={[styles.searchWrap, isPhone && { width: "100%" }]}>
-            <SearchBar palette={palette} value={searchQuery} onChangeText={setSearchQuery} placeholder="Search orders..." />
+            <SearchBar palette={palette} value={searchQuery} onChangeText={handleSearchChange} placeholder="Search orders..." />
           </View>
           <View style={isPhone ? { width: "100%", marginTop: 12 } : undefined}>
             <StatusFilterDropdown palette={palette} value={statusFilter} onChange={setStatusFilter} />
           </View>
         </View>
+      </View>
+
+      {/* Delivery type (ASAP vs Scheduled) + calendar filter row */}
+      <View style={[styles.filterRow, isPhone && { flexDirection: "column", alignItems: "stretch" }]}>
+        <View style={[styles.deliveryTypePills, { backgroundColor: palette.pillBg }]}>
+          {(["all", "asap", "scheduled"] as DeliveryTypeFilter[]).map((option) => {
+            const isActive = option === deliveryTypeFilter;
+            const label = option === "all" ? "All Deliveries" : option === "asap" ? "ASAP" : "Scheduled";
+            return (
+              <Pressable
+                key={option}
+                onPress={() => setDeliveryTypeFilter(option)}
+                style={[styles.deliveryTypePill, isActive && { backgroundColor: palette.card }]}
+              >
+                <Text style={[styles.deliveryTypePillText, { color: isActive ? palette.text : palette.muted, fontWeight: isActive ? "800" : "600" }]}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Calendar filter — lets the admin see what's Scheduled for a
+            specific day. Only meaningful once "Scheduled" is selected
+            above, but works standalone too (filters any order type by
+            scheduled_date). */}
+        <View style={[styles.dateFilterWrap, { borderColor: palette.border, backgroundColor: palette.card }]}>
+          <Ionicons name="calendar-outline" size={16} color={palette.muted} />
+          {Platform.OS === "web" ? (
+            // @ts-ignore — real <input type="date"> for the browser's native picker
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e: any) => setDateFilter(e.target.value)}
+              style={{
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                color: palette.text,
+                fontSize: 13.5,
+                fontFamily: "inherit",
+                marginLeft: 8,
+                flex: 1,
+              }}
+            />
+          ) : (
+            <Text style={[styles.dateFilterText, { color: dateFilter ? palette.text : palette.muted }]}>
+              {dateFilter || "Filter by date"}
+            </Text>
+          )}
+          {dateFilter ? (
+            <Pressable onPress={() => setDateFilter("")} hitSlop={8}>
+              <Ionicons name="close-circle" size={16} color={palette.muted} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <Pressable
+          onPress={() => setDateFilter(todayString())}
+          style={[styles.todayButton, { borderColor: palette.border }]}
+        >
+          <Text style={[styles.todayButtonText, { color: palette.text }]}>Today</Text>
+        </Pressable>
       </View>
 
       <OrdersStatsCards palette={palette} total={stats.total} pending={stats.pending} active={stats.active} completed={stats.completed} />
@@ -273,6 +349,24 @@ const styles = StyleSheet.create({
   pageSubtitle: { fontSize: 13.5, marginTop: 6 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 12 },
   searchWrap: { width: 260 },
+
+  filterRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" },
+  deliveryTypePills: { flexDirection: "row", borderRadius: 12, padding: 4, gap: 2 },
+  deliveryTypePill: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 9 },
+  deliveryTypePillText: { fontSize: 12.5 },
+  dateFilterWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 44,
+    minWidth: 190,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  dateFilterText: { fontSize: 13.5, marginLeft: 8, flex: 1 },
+  todayButton: { height: 44, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  todayButtonText: { fontSize: 12.5, fontWeight: "700" },
 
   errorBanner: { borderRadius: 12, padding: 14, marginBottom: 16 },
   errorBannerText: { fontSize: 12.5, fontWeight: "700" },

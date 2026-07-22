@@ -15,12 +15,16 @@ function CustomerCardBase({
   customer,
   delay = 0,
   onDelete,
+  onDistributorPress,
 }: {
   palette: Palette;
   customer: Customer;
   delay?: number;
   onDelete: (customer: Customer) => void;
+  onDistributorPress: (customer: Customer) => void;
 }) {
+  const isPendingApplication = customer.distributorApplication?.status === "pending";
+
   return (
     <Animated.View
       entering={FadeInDown.duration(380).delay(delay)}
@@ -46,6 +50,32 @@ function CustomerCardBase({
         palette={palette}
       />
       <InfoRow icon="calendar-outline" text={`Joined ${formatJoinedDate(customer.joinedAt)}`} palette={palette} />
+
+      {customer.distributorApplication && (
+        <Pressable
+          onPress={() => onDistributorPress(customer)}
+          style={[
+            styles.distributorButton,
+            {
+              borderColor: isPendingApplication ? palette.danger + "40" : palette.border,
+            },
+          ]}
+        >
+          <Ionicons
+            name="business-outline"
+            size={15}
+            color={isPendingApplication ? palette.danger : palette.muted}
+          />
+          <Text
+            style={[
+              styles.distributorButtonText,
+              { color: isPendingApplication ? palette.danger : palette.muted },
+            ]}
+          >
+            {isPendingApplication ? "Distributor Application (Pending)" : "View Distributor Application"}
+          </Text>
+        </Pressable>
+      )}
 
       <Pressable
         onPress={() => onDelete(customer)}
@@ -79,7 +109,7 @@ const styles = StyleSheet.create({
   divider: { height: 1, marginVertical: 14 },
   infoRow: { flexDirection: "row", alignItems: "flex-start", gap: 8, marginBottom: 10 },
   infoText: { fontSize: 12.5, flexShrink: 1, lineHeight: 17 },
-  deleteButton: {
+  distributorButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -88,6 +118,17 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     marginTop: 6,
+  },
+  distributorButtonText: { fontSize: 12.5, fontWeight: "700" },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 10,
   },
   deleteButtonText: { fontSize: 12.5, fontWeight: "700" },
 });

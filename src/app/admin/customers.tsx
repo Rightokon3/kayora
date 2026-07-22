@@ -6,7 +6,7 @@ import { AdminLayout } from "../../components/layout/AdminLayout";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useResponsive } from "../../hooks/useResponsive";
 import { CustomerService } from "../../services/CustomerService";
-import { Customer, AccountInactivationRequest } from "../../types/customer";
+import { Customer, AccountInactivationRequest, DistributorApplication } from "../../types/customer";
 import { SearchBar } from "../../components/products/SearchBar";
 import { Toast, ToastState } from "../../components/products/Toast";
 import { CustomerTable } from "../../components/customers/CustomerTable";
@@ -15,6 +15,8 @@ import { DeleteCustomerModal } from "../../components/customers/DeleteCustomerMo
 import { CustomersSkeleton } from "../../components/customers/CustomersSkeleton";
 import { CustomersEmptyState } from "../../components/customers/EmptyState";
 import { InactivationRequestsModal } from "../../components/customers/InactivationRequestsModal";
+import { DistributorApplicationModal } from "../../components/customers/DistributorApplicationModal";
+import { useAdminPushNotifications } from "../../hooks/useAdminPushNotifications";
 
 const SEARCH_DEBOUNCE_MS = 350;
 
@@ -33,6 +35,16 @@ export default function CustomersScreen() {
   const [inactivationRequests, setInactivationRequests] = useState<AccountInactivationRequest[]>([]);
   const [requestsModalVisible, setRequestsModalVisible] = useState(false);
   const [resolvingRequestId, setResolvingRequestId] = useState<number | null>(null);
+
+  /* Distributor application — per-row icon + modal */
+  const [distributorModalVisible, setDistributorModalVisible] = useState(false);
+  const [distributorDetail, setDistributorDetail] = useState<DistributorApplication | null>(null);
+  const [loadingDistributorDetail, setLoadingDistributorDetail] = useState(false);
+  const [distributorActionLoading, setDistributorActionLoading] = useState(false);
+
+  // Registers this admin device for push notifications once per
+  // session (new distributor-application submissions ping this).
+  useAdminPushNotifications();
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,6 +139,56 @@ export default function CustomersScreen() {
     [loadInactivationRequests, loadCustomers, searchQuery, showToast]
   );
 
+  const handleOpenDistributorApplication = useCallback(async (customer: Customer) => {
+    if (!customer.distributorApplication) return;
+    setDistributorModalVisible(true);
+    setLoadingDistributorDetail(true);
+    try {
+      const detail = await CustomerService.getDistributorApplication(customer.distributorApplication.id);
+      setDistributorDetail(detail);
+    } catch (e) {
+      showToast("Could not load this application. Please try again.", "error");
+      setDistributorModalVisible(false);
+    } finally {
+      setLoadingDistributorDetail(false);
+    }
+  }, [showToast]);
+
+  const handleCloseDistributorModal = useCallback(() => {
+    setDistributorModalVisible(false);
+    setDistributorDetail(null);
+  }, []);
+
+  const handleApproveDistributor = useCallback(async () => {
+    if (!distributorDetail) return;
+    setDistributorActionLoading(true);
+    try {
+      await CustomerService.approveDistributorApplication(distributorDetail.id);
+      showToast("Distributor application approved", "success");
+      handleCloseDistributorModal();
+      await loadCustomers(searchQuery);
+    } catch (e) {
+      showToast("Could not approve this application. Please try again.", "error");
+    } finally {
+      setDistributorActionLoading(false);
+    }
+  }, [distributorDetail, handleCloseDistributorModal, loadCustomers, searchQuery, showToast]);
+
+  const handleDenyDistributor = useCallback(async () => {
+    if (!distributorDetail) return;
+    setDistributorActionLoading(true);
+    try {
+      await CustomerService.denyDistributorApplication(distributorDetail.id);
+      showToast("Distributor application denied", "success");
+      handleCloseDistributorModal();
+      await loadCustomers(searchQuery);
+    } catch (e) {
+      showToast("Could not deny this application. Please try again.", "error");
+    } finally {
+      setDistributorActionLoading(false);
+    }
+  }, [distributorDetail, handleCloseDistributorModal, loadCustomers, searchQuery, showToast]);
+
   const pendingCount = inactivationRequests.length;
 
   return (
@@ -182,11 +244,17 @@ export default function CustomersScreen() {
                     palette={palette}
                     delay={index * 40}
                     onDelete={handleRequestDelete}
+                    onDistributorPress={handleOpenDistributorApplication}
                   />
                 ))}
               </View>
             ) : (
-              <CustomerTable palette={palette} customers={customers} onDelete={handleRequestDelete} />
+              <CustomerTable
+                palette={palette}
+                customers={customers}
+                onDelete={handleRequestDelete}
+                onDistributorPress={handleOpenDistributorApplication}
+              />
             )}
           </View>
         </Animated.View>
@@ -208,6 +276,17 @@ export default function CustomersScreen() {
         resolvingId={resolvingRequestId}
         onClose={() => setRequestsModalVisible(false)}
         onResolve={handleResolveRequest}
+      />
+
+      <DistributorApplicationModal
+        visible={distributorModalVisible}
+        palette={palette}
+        application={distributorDetail}
+        loadingDetail={loadingDistributorDetail}
+        actionLoading={distributorActionLoading}
+        onClose={handleCloseDistributorModal}
+        onApprove={handleApproveDistributor}
+        onDeny={handleDenyDistributor}
       />
 
       <Toast toast={toast} palette={palette} />

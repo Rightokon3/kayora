@@ -1,13 +1,3 @@
-/* ============================================================
-   ORDER DOMAIN TYPES
-   ------------------------------------------------------------
-   Contract between the UI and OrdersService. Shapes are kept
-   flat and explicit so they map cleanly onto whatever the
-   Laravel API eventually returns from GET /orders, GET
-   /orders/{id}, etc. — no component needs to change when the
-   mock repository is swapped for real HTTP calls.
-============================================================ */
-
 export type OrderStatus =
   | "Pending"
   | "Accepted"
@@ -19,11 +9,11 @@ export type OrderStatus =
   | "Cancelled";
 
 export type PaymentStatus = "Paid" | "Unpaid" | "Refunded";
-export type PaymentMethod = "Card" | "Cash" | "Transfer";
-export type DeliveryType = "Instant" | "Scheduled";
 export type OrderPriority = "Normal" | "High" | "Urgent";
-
 export type OrderTab = "all" | "pending" | "in_progress" | "completed";
+
+export const IN_PROGRESS_STATUSES: OrderStatus[] = ["Accepted", "Assigned", "Preparing", "Out For Delivery"];
+export const COMPLETED_STATUSES: OrderStatus[] = ["Delivered"];
 
 export const STATUS_FILTERS: { key: OrderStatus | "all"; label: string }[] = [
   { key: "all", label: "All Statuses" },
@@ -37,17 +27,7 @@ export const STATUS_FILTERS: { key: OrderStatus | "all"; label: string }[] = [
   { key: "Cancelled", label: "Cancelled" },
 ];
 
-// Which statuses count toward each of the 4 tabs / stat cards.
-export const IN_PROGRESS_STATUSES: OrderStatus[] = [
-  "Accepted",
-  "Assigned",
-  "Scheduled",
-  "Preparing",
-  "Out For Delivery",
-];
-export const COMPLETED_STATUSES: OrderStatus[] = ["Delivered", "Cancelled"];
-
-export interface OrderedProduct {
+export interface OrderProductLine {
   bottleName: string;
   size: string;
   quantity: number;
@@ -55,21 +35,15 @@ export interface OrderedProduct {
   subtotal: number;
 }
 
-export interface TimelineEvent {
-  label: string;
-  timestamp: string | null;
-  completed: boolean;
-}
-
 export interface OrderCustomer {
   name: string;
   phone: string;
   email: string;
-  profilePicture: string | null;
   deliveryAddress: string;
   nearestLandmark: string;
   latitude: number;
   longitude: number;
+  profilePicture: string | null;
 }
 
 export interface OrderDelivery {
@@ -80,28 +54,31 @@ export interface OrderDelivery {
   distanceKm: number | null;
 }
 
-export interface Order {
-  id: string;
-  orderDate: string; // ISO
-  customer: OrderCustomer;
-  products: OrderedProduct[];
-  amount: number;
-  status: OrderStatus;
-  paymentMethod: PaymentMethod;
-  paymentStatus: PaymentStatus;
-  transactionId: string;
-  deliveryType: DeliveryType;
-  scheduledDate: string | null; // ISO date, only if deliveryType === "Scheduled"
-  scheduledTime: string | null; // e.g. "2:00 PM"
-  priority: OrderPriority;
-  delivery: OrderDelivery;
-  timeline: TimelineEvent[];
-  specialInstructions: string;
+export interface TimelineEvent {
+  label: string;
+  completed: boolean;
+  timestamp: string | null;
 }
 
-/* ============================================================
-   EDIT ORDER FORM SHAPE
-============================================================ */
+export interface Order {
+  id: string;
+  customer: OrderCustomer;
+  products: OrderProductLine[];
+  amount: number;
+  status: OrderStatus;
+  paymentMethod: string;
+  paymentStatus: PaymentStatus;
+  transactionId: string;
+  deliveryType: "Instant" | "Scheduled";
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  priority: OrderPriority;
+  specialInstructions: string;
+  orderDate: string;
+  delivery: OrderDelivery;
+  timeline: TimelineEvent[];
+}
+
 export interface OrderEditInput {
   deliveryDate: string;
   deliveryTime: string;
@@ -114,19 +91,14 @@ export interface OrderEditInput {
   specialInstructions: string;
 }
 
-/* ============================================================
-   AVAILABLE DRIVER (for Assign Driver modal)
-============================================================ */
 export interface AvailableDriver {
   id: string;
   driverId: string;
   name: string;
-  phone: string;
-  profileImage?: string;
+  profileImage: string | null;
   status: "active" | "delivering";
-  assignedDeliveries: number;
+  phone: string;
   vehicle: string;
-  latitude: number;
-  longitude: number;
   distanceKm: number;
+  assignedDeliveries: number;
 }

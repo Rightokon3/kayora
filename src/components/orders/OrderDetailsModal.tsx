@@ -52,11 +52,25 @@ export function OrderDetailsModal({
   if (!order) return null;
 
   const initial = order.customer.name.trim().charAt(0).toUpperCase();
+
+  // Assign button shows only when: order is still Pending AND either it's
+  // an Instant/ASAP order (deliverable right now), or it's Scheduled for
+  // TODAY specifically — not any future date. An order scheduled for
+  // tomorrow shouldn't be assignable yet.
+  const isScheduledForToday = (() => {
+    if (!order.scheduledDate) return false;
+    const today = new Date();
+    const scheduled = new Date(order.scheduledDate);
+    return (
+      scheduled.getFullYear() === today.getFullYear() &&
+      scheduled.getMonth() === today.getMonth() &&
+      scheduled.getDate() === today.getDate()
+    );
+  })();
+
   const needsDriverAssignment =
-    !order.delivery.driverId &&
-    order.status !== "Delivered" &&
-    order.status !== "Cancelled" &&
-    (order.deliveryType === "Instant" || (order.scheduledDate ? new Date(order.scheduledDate).getTime() > Date.now() : false));
+    order.status === "Pending" &&
+    (order.deliveryType === "Instant" || isScheduledForToday);
 
   return (
     <Modal visible animationType="slide" transparent onRequestClose={onClose}>
