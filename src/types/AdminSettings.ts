@@ -23,6 +23,8 @@ export interface ProfileUpdateInput {
   fullName: string;
   email: string;
   phone: string;
+  /** Required — the admin's current password, confirming it's really them making the change. */
+  password: string;
 }
 
 export interface PasswordUpdateInput {

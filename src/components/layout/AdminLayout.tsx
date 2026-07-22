@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useResponsive } from "../../hooks/useResponsive";
 import { useAdminAuth } from "../../context/AdminAuthContext";
+import { useAdminAlerts } from "../../hooks/useAdminAlerts";
 import { Sidebar, AdminUser } from "../sidebar/sidebar";
 import { MobileDrawer } from "../sidebar/mobileDrawer";
 import { TopHeader } from "./TopHeader";
@@ -22,6 +23,13 @@ export function AdminLayout({
   const router = useRouter();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Runs continuously across every admin page (not just Settings) — polls
+  // for new orders/driver updates and fires real browser notifications
+  // per the admin's toggles. Called unconditionally here (before the
+  // early-return guard below) per the Rules of Hooks; it'll silently no-op
+  // on any request that fires before the admin is actually authenticated.
+  useAdminAlerts();
+
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
@@ -31,7 +39,7 @@ export function AdminLayout({
   // everywhere at once rather than needing to be repeated per-screen.
   useEffect(() => {
     if (status === "guest") {
-      router.replace("/(admin)/login" as any);
+      router.replace("/admin/login" as any);
     }
   }, [status]);
 

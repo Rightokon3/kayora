@@ -19,7 +19,7 @@ import { AdminLayout } from "../../components/layout/AdminLayout";
 import { useTheme, ThemeMode } from "../../contexts/ThemeContext";
 import { useResponsive } from "../../hooks/useResponsive";
 import { useAdminAuth } from "../../context/AdminAuthContext";
-import { AdminSettingsService } from "../../services/adminSettingsDemo";
+import { AdminSettingsService } from "../../services/adminSettings";
 import {
   AdminProfile,
   NotificationPreferences,
@@ -27,6 +27,7 @@ import {
 } from "../../types/AdminSettings";
 import { ImageUploader } from "../../components/products/ImageUploader";
 import { Toast, ToastState } from "../../components/products/Toast";
+import { ApiError } from "../../services/adminApi";
 
 /* ============================================================
    HELPERS
@@ -156,6 +157,8 @@ function EditProfileModal({
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -165,12 +168,19 @@ function EditProfileModal({
       setFullName(profile.fullName);
       setEmail(profile.email);
       setPhone(profile.phone);
+      setConfirmPassword("");
+      setError(null);
     }
   }, [visible, profile]);
 
   if (!visible) return null;
 
   const handleSave = async () => {
+    setError(null);
+    if (!confirmPassword) {
+      setError("Enter your password to confirm these changes.");
+      return;
+    }
     setSaving(true);
     try {
       const updated = await AdminSettingsService.updateProfile({
@@ -179,8 +189,11 @@ function EditProfileModal({
         fullName,
         email,
         phone,
+        password: confirmPassword,
       });
       onSaved(updated);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not update profile. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -239,6 +252,23 @@ function EditProfileModal({
                   value={phone}
                   onChangeText={setPhone}
                   keyboardType="phone-pad"
+                  placeholderTextColor={palette.muted}
+                />
+              </ModalField>
+
+              <ModalField label="Confirm With Your Password" palette={palette} error={error ?? undefined}>
+                <Text style={[styles.currentValueText, { color: palette.muted, marginBottom: 8 }]}>
+                  Enter your current password to confirm it's really you making these changes.
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: palette.text, borderColor: error ? palette.danger : palette.border, backgroundColor: palette.background },
+                  ]}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
                   placeholderTextColor={palette.muted}
                 />
               </ModalField>
@@ -771,8 +801,6 @@ export default function SettingsScreen() {
       <SettingsCard palette={palette} title="About" delay={180}>
         <InfoRow label="App Version" value={systemInfo.appVersion} palette={palette} />
         <InfoRow label="Build Number" value={systemInfo.buildNumber} palette={palette} />
-        <InfoRow label="Laravel API Status" value={systemInfo.apiStatus} palette={palette} />
-        <InfoRow label="Database Connection" value={systemInfo.databaseStatus} palette={palette} />
         <InfoRow label="Last Sync Time" value={formatDateTime(systemInfo.lastSyncTime)} palette={palette} />
         <InfoRow label="Company Name" value={systemInfo.companyName} palette={palette} />
         <InfoRow label="Copyright" value={`© ${systemInfo.copyrightYear} ${systemInfo.companyName}`} palette={palette} isLast />
