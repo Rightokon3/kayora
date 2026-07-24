@@ -405,7 +405,7 @@ export default function AdminLoginScreen() {
                   />
                   <TextInput
                     style={[styles.input, { color: palette.text }]}
-                    placeholder="SUP-0001 or admin@kayora.com"
+                    placeholder="Enter your email"
                     placeholderTextColor={palette.subtitle}
                     autoCapitalize="none"
                     autoCorrect={false}
