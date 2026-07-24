@@ -39,7 +39,7 @@ export function AdminLayout({
   // everywhere at once rather than needing to be repeated per-screen.
   useEffect(() => {
     if (status === "guest") {
-      router.replace("/admin/login" as any);
+      router.replace("/(auth)/login" as any);
     }
   }, [status]);
 

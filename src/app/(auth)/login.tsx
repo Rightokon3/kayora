@@ -293,7 +293,7 @@ export default function AdminLoginScreen() {
         token: string;
         expiresAt: string;
         admin: { employeeId: string; email: string; name: string; role: AdminRole; profilePicture: string | null };
-      }>("/(auth)/login", {
+      }>("/admin/login", {
         method: "POST",
         body: JSON.stringify({
           identifier: identifier.trim(),

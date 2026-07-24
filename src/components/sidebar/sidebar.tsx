@@ -41,11 +41,18 @@ const MENU_ITEMS = [
     icon: "receipt-outline",
     route: "/admin/orders" as const,
   },
-  {
+   {
     key: "settings",
     label: "Settings",
     icon: "settings-outline",
     route: "/admin/settings" as const,
+  },
+  {
+    key: "manage-admins",
+    label: "Manage Administrators",
+    icon: "shield-checkmark-outline",
+    route: "/admin/manage-admins" as const,
+    superAdminOnly: true,
   },
 ];
 
@@ -63,6 +70,10 @@ function SidebarBase({
 
   const roleLabel =
     user.role === "super_admin" ? "Super Administrator" : "Administrator";
+
+  const visibleMenuItems = MENU_ITEMS.filter(
+    (item) => !item.superAdminOnly || user.role === "super_admin"
+  );
 
   return (
     <View
@@ -84,7 +95,7 @@ function SidebarBase({
       </View>
 
       <View style={styles.menuList}>
-        {MENU_ITEMS.map((item) => {
+        {visibleMenuItems.map((item) => {
           const isActive = pathname?.includes(item.key);
           return (
             <Pressable

@@ -44,9 +44,11 @@ const SESSION_USER_KEY = "kayora_admin_session_user";
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  errors?: Record<string, string[]>;
+  constructor(message: string, status: number, errors?: Record<string, string[]>) {
     super(message);
     this.status = status;
+    this.errors = errors;
   }
 }
 
@@ -125,9 +127,9 @@ export async function adminApiFetch<T = any>(path: string, options: RequestInit 
     throw new ApiError(body.message ?? "You do not have permission to do that.", 403);
   }
 
-  if (!response.ok) {
-    throw new ApiError(body.message ?? "Request failed", response.status);
-  }
+if (!response.ok) {
+  throw new ApiError(body.message ?? "Request failed", response.status, body.errors);
+}
 
   return body as T;
 }
