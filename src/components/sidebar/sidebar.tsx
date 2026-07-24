@@ -30,6 +30,12 @@ const MENU_ITEMS = [
     route: "/admin/drivers" as const,
   },
   {
+    key: "manage-vehicles",
+    label: "Vehicles",
+    icon: "car-outline",
+    route: "/admin/manage-vehicles" as const,
+  },
+  {
     key: "products",
     label: "Products",
     icon: "cube-outline",
