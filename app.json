@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/kayora-logo.png",
         "monochromeImage": "./assets/images/kayora-logo.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.kayora.admin"
     },
     "web": {
       "output": "static",
@@ -33,11 +34,24 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "@maplibre/maplibre-react-native"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "968ff355-b29d-4017-8087-9603872b903e"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/968ff355-b29d-4017-8087-9603872b903e"
     }
   }
 }

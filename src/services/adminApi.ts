@@ -1,6 +1,6 @@
-import { Platform } from "react-native";
-import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 /* ============================================================
    ADMIN API CLIENT
@@ -36,7 +36,9 @@ const storage = {
   },
 };
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ??
+  "https://kayorabackend-production.up.railway.app/api";
 
 const TOKEN_KEY = "kayora_admin_token";
 const TOKEN_EXPIRY_KEY = "kayora_admin_token_expiry";
@@ -45,7 +47,11 @@ const SESSION_USER_KEY = "kayora_admin_session_user";
 export class ApiError extends Error {
   status: number;
   errors?: Record<string, string[]>;
-  constructor(message: string, status: number, errors?: Record<string, string[]>) {
+  constructor(
+    message: string,
+    status: number,
+    errors?: Record<string, string[]>,
+  ) {
     super(message);
     this.status = status;
     this.errors = errors;
@@ -55,7 +61,13 @@ export class ApiError extends Error {
 export async function saveAdminSession(
   token: string,
   expiresAt: string,
-  user: { employeeId: string; email: string; name: string; role: "super_admin" | "admin"; profilePicture: string | null }
+  user: {
+    employeeId: string;
+    email: string;
+    name: string;
+    role: "super_admin" | "admin";
+    profilePicture: string | null;
+  },
 ) {
   await storage.setItem(TOKEN_KEY, token);
   await storage.setItem(TOKEN_EXPIRY_KEY, expiresAt);
@@ -91,7 +103,10 @@ export async function getStoredAdminUser(): Promise<{
   }
 }
 
-export async function adminApiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+export async function adminApiFetch<T = any>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
   const token = await storage.getItem(TOKEN_KEY);
 
   // FormData (file uploads) must NOT have a manual Content-Type — the
@@ -99,7 +114,8 @@ export async function adminApiFetch<T = any>(path: string, options: RequestInit 
   // "application/json" here, as this function did before, silently broke
   // every multipart upload (Cloudinary would receive a body it couldn't
   // parse as an image at all).
-  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const isFormData =
+    typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -120,16 +136,26 @@ export async function adminApiFetch<T = any>(path: string, options: RequestInit 
       await clearAdminSession();
       throw new ApiError("Session expired. Please log in again.", 401);
     }
-    throw new ApiError(body.message ?? "Invalid administrator credentials.", 401);
+    throw new ApiError(
+      body.message ?? "Invalid administrator credentials.",
+      401,
+    );
   }
 
   if (response.status === 403) {
-    throw new ApiError(body.message ?? "You do not have permission to do that.", 403);
+    throw new ApiError(
+      body.message ?? "You do not have permission to do that.",
+      403,
+    );
   }
 
-if (!response.ok) {
-  throw new ApiError(body.message ?? "Request failed", response.status, body.errors);
-}
+  if (!response.ok) {
+    throw new ApiError(
+      body.message ?? "Request failed",
+      response.status,
+      body.errors,
+    );
+  }
 
   return body as T;
 }

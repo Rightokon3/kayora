@@ -12,11 +12,13 @@ import {
   Animated,
   Platform,
   KeyboardAvoidingView,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 
 import { useTheme } from "../../contexts/ThemeContext";
-import { useAdminAuth } from "../../context/AdminAuthContext";
 import { adminApiFetch, ApiError } from "../../services/adminApi";
 import { AdminLayout } from "../../components/layout/AdminLayout";
 
@@ -24,223 +26,128 @@ import { AdminLayout } from "../../components/layout/AdminLayout";
 // Types
 // ---------------------------------------------------------------------------
 
-type Role = "Super Administrator" | "Administrator";
-type Status = "Active" | "Inactive";
+type VehicleStatus = "Available" | "Assigned" | "Maintenance";
 
-interface Administrator {
+interface AssignedDriver {
   id: string;
-  firstName: string;
-  lastName: string;
-  username: string;
-  email: string;
+  driverId: string;
+  name: string;
   phone: string;
-  department: string;
-  role: Role;
-  status: Status;
-  lastLogin: string;
-  dateCreated: string;
-  permissions: string[];
+  email: string;
 }
 
-interface PermissionGroup {
-  key: string;
-  label: string;
-  permissions: { key: string; label: string }[];
+interface VehicleRecord {
+  id: string;
+  brand: string;
+  model: string;
+  vehicleType: string;
+  plateNumber: string;
+  engineNumber: string;
+  chassisNumber: string;
+  color: string;
+  image: string | null;
+  registrationImage: string | null;
+  status: VehicleStatus;
+  assignedDriverId: string | null;
+  assignedDriver: AssignedDriver | null;
+  dateAdded: string;
+}
+
+interface DriverOption {
+  id: string;
+  driverId: string;
+  name: string;
+  currentVehiclePlate: string | null;
 }
 
 // ---------------------------------------------------------------------------
 // Static config
 // ---------------------------------------------------------------------------
 
-const ROLES: Role[] = ["Super Administrator", "Administrator"];
+const VEHICLE_TYPES = ["Van", "Pickup", "Truck", "Bike", "Car"];
 
-const DEPARTMENTS = [
-  "Management",
-  "Operations",
-  "Customer Support",
-  "Logistics & Dispatch",
-  "Finance & Accounting",
-  "Engineering & IT",
-  "Marketing & Sales",
-];
-
-const FILTER_ROLES = ["All", "Super Administrator", "Administrator"];
-
-const PERMISSION_GROUPS: PermissionGroup[] = [
-  { key: "dashboard", label: "Dashboard", permissions: [{ key: "view_dashboard", label: "View Dashboard" }] },
-  {
-    key: "orders",
-    label: "Orders",
-    permissions: [
-      { key: "view_orders", label: "View Orders" },
-      { key: "edit_orders", label: "Edit Orders" },
-      { key: "delete_orders", label: "Delete Orders" },
-      { key: "assign_drivers", label: "Assign Drivers" },
-    ],
-  },
-  {
-    key: "products",
-    label: "Products",
-    permissions: [
-      { key: "view_products", label: "View Products" },
-      { key: "add_products", label: "Add Products" },
-      { key: "edit_products", label: "Edit Products" },
-      { key: "delete_products", label: "Delete Products" },
-    ],
-  },
-  {
-    key: "customers",
-    label: "Customers",
-    permissions: [
-      { key: "view_customers", label: "View Customers" },
-      { key: "delete_customers", label: "Delete Customers" },
-    ],
-  },
-  {
-    key: "drivers",
-    label: "Drivers",
-    permissions: [
-      { key: "view_drivers", label: "View Drivers" },
-      { key: "add_drivers", label: "Add Drivers" },
-      { key: "edit_drivers", label: "Edit Drivers" },
-      { key: "delete_drivers", label: "Delete Drivers" },
-      { key: "track_drivers", label: "Track Drivers" },
-    ],
-  },
-  {
-    key: "reports",
-    label: "Reports",
-    permissions: [
-      { key: "view_reports", label: "View Reports" },
-      { key: "export_reports", label: "Export Reports" },
-    ],
-  },
-  {
-    key: "settings",
-    label: "Settings",
-    permissions: [
-      { key: "view_settings", label: "View Settings" },
-      { key: "manage_settings", label: "Manage Settings" },
-    ],
-  },
-  {
-    key: "admin_management",
-    label: "Administrator Management",
-    permissions: [
-      { key: "view_admins", label: "View Administrators" },
-      { key: "add_admins", label: "Add Administrators" },
-      { key: "edit_admins", label: "Edit Administrators" },
-      { key: "delete_admins", label: "Delete Administrators" },
-    ],
-  },
+const STATUS_TABS: { key: "All" | VehicleStatus; label: string }[] = [
+  { key: "All", label: "All Vehicles" },
+  { key: "Available", label: "Unassigned" },
+  { key: "Assigned", label: "Assigned" },
+  { key: "Maintenance", label: "Maintenance" },
 ];
 
 // ---------------------------------------------------------------------------
 // Backend-connected service layer
 // ---------------------------------------------------------------------------
 
-const adminService = {
-  async getAdministrators(): Promise<Administrator[]> {
-    return adminApiFetch<Administrator[]>("/admin/admins");
-  },
-  async searchAdministrators(_all: Administrator[], query: string): Promise<Administrator[]> {
-    const q = query.trim();
-    const path = q ? `/admin/admins?search=${encodeURIComponent(q)}` : "/admin/admins";
-    return adminApiFetch<Administrator[]>(path);
-  },
-  async checkAvailability(
-    username: string,
-    email: string,
-    excludeId?: string
-  ): Promise<{ usernameTaken: boolean; emailTaken: boolean }> {
+const vehicleService = {
+  async getVehicles(status: string, search: string): Promise<VehicleRecord[]> {
     const params = new URLSearchParams();
-    if (username.trim()) params.set("username", username.trim());
-    if (email.trim()) params.set("email", email.trim());
-    if (excludeId) params.set("excludeId", excludeId);
-    return adminApiFetch<{ usernameTaken: boolean; emailTaken: boolean }>(
-      `/admin/admins/check-availability?${params.toString()}`
-    );
+    if (status && status !== "All") params.set("status", status);
+    if (search.trim()) params.set("search", search.trim());
+    const qs = params.toString();
+    return adminApiFetch<VehicleRecord[]>(`/admin/vehicles${qs ? `?${qs}` : ""}`);
   },
-  async createAdministrator(payload: Partial<Administrator> & { password: string }): Promise<Administrator> {
-    return adminApiFetch<Administrator>("/admin/admins", {
+  async getVehicle(id: string): Promise<VehicleRecord> {
+    return adminApiFetch<VehicleRecord>(`/admin/vehicles/${id}`);
+  },
+  async createVehicle(payload: Partial<VehicleRecord>): Promise<VehicleRecord> {
+    return adminApiFetch<VehicleRecord>("/admin/vehicles", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
-  async updateAdministrator(id: string, payload: Partial<Administrator>): Promise<Administrator> {
-    return adminApiFetch<Administrator>(`/admin/admins/${id}`, {
+  async updateVehicle(id: string, payload: Partial<VehicleRecord>): Promise<VehicleRecord> {
+    return adminApiFetch<VehicleRecord>(`/admin/vehicles/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   },
-  async confirmPassword(password: string): Promise<boolean> {
-    const result = await adminApiFetch<{ valid: boolean }>("/admin/admins/confirm-password", {
+  async deleteVehicle(id: string): Promise<void> {
+    await adminApiFetch(`/admin/vehicles/${id}`, { method: "DELETE" });
+  },
+  async assignVehicle(id: string, driverId: string): Promise<VehicleRecord> {
+    return adminApiFetch<VehicleRecord>(`/admin/vehicles/${id}/assign`, {
       method: "POST",
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ driverId }),
     });
-    return result.valid;
   },
-  async deleteAdministrator(id: string): Promise<void> {
-    await adminApiFetch(`/admin/admins/${id}`, { method: "DELETE" });
+  async unassignVehicle(id: string): Promise<VehicleRecord> {
+    return adminApiFetch<VehicleRecord>(`/admin/vehicles/${id}/unassign`, { method: "POST" });
   },
-  assignPermissions(permissions: string[]): string[] {
-    return permissions;
+  async getAssignableDrivers(): Promise<DriverOption[]> {
+    // Reuses the existing driver list endpoint rather than a dedicated
+    // one — DriverController::index() already returns each driver's
+    // current vehicle, which is exactly what the picker needs to show
+    // ("currently on Toyota Hilux") and reassigning here still works
+    // correctly server-side (VehicleController::doAssign frees the
+    // driver's old vehicle automatically).
+    const drivers = await adminApiFetch<any[]>("/admin/drivers");
+    return drivers.map((d) => ({
+      id: d.id,
+      driverId: d.driverId,
+      name: `${d.firstName} ${d.lastName}`.trim(),
+      currentVehiclePlate: d.vehicle?.plateNumber && d.vehicle.plateNumber !== "—" ? d.vehicle.plateNumber : null,
+    }));
+  },
+  async uploadImage(uri: string): Promise<string> {
+    // `uri` is expected to already be a JPEG produced by ImageManipulator
+    // (see ImagePickerField.handlePick) — iOS photo library assets come
+    // back as HEIC by default, which Laravel's `image`/`mimes` rules
+    // reject, so conversion happens before this is ever called.
+    const formData = new FormData();
+    formData.append("file", {
+      uri,
+      name: "upload.jpg",
+      type: "image/jpeg",
+    } as any);
+    const result = await adminApiFetch<{ success: boolean; url: string }>("/admin/upload-image", {
+      method: "POST",
+      body: formData,
+    });
+    return result.url;
   },
 };
 
 // ---------------------------------------------------------------------------
-// Small shared bits
-// ---------------------------------------------------------------------------
-
-function initialsOf(a: Administrator) {
-  if (a.username) {
-    return a.username[0].toUpperCase();
-  }
-  return `${a.firstName?.[0] ?? ""}${a.lastName?.[0] ?? ""}`.toUpperCase();
-}
-
-function statusColor(colors: any, status: Status) {
-  switch (status) {
-    case "Active":
-      return { bg: colors.success + "1A", fg: colors.success ?? "#1E9E5A" };
-    case "Inactive":
-      return { bg: colors.border, fg: colors.muted };
-  }
-}
-
-function roleBadgeColor(colors: any, role: Role) {
-  switch (role) {
-    case "Super Administrator":
-      return { bg: colors.primary + "1A", fg: colors.primary ?? "#0D4A8C" };
-    case "Administrator":
-      return { bg: colors.warning + "1A", fg: colors.warning ?? "#B7791F" };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Access Denied screen
-// ---------------------------------------------------------------------------
-
-function AccessDeniedView({ colors, onGoBack }: { colors: any; onGoBack: () => void }) {
-  return (
-    <View style={[localStyles(colors).centerFill, { padding: 24 }]}>
-      <View style={localStyles(colors).lockCircle}>
-        <Ionicons name="lock-closed" size={40} color={colors.primary} />
-      </View>
-      <Text style={[localStyles(colors).deniedTitle]}>Access Restricted</Text>
-      <Text style={[localStyles(colors).deniedSubtitle]}>
-        Only the Super Administrator can access this page.
-      </Text>
-      <Pressable style={localStyles(colors).primaryButton} onPress={onGoBack}>
-        <Ionicons name="arrow-back" size={18} color={"#FFFFFF"} />
-        <Text style={localStyles(colors).primaryButtonText}>Go Back</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Toast
+// Toast (identical pattern to manage-admins.tsx)
 // ---------------------------------------------------------------------------
 
 function useToast() {
@@ -274,27 +181,15 @@ function ToastView({ colors, toast }: { colors: any; toast: ReturnType<typeof us
         {
           backgroundColor: isSuccess ? colors.success ?? "#1E9E5A" : colors.danger ?? "#D64545",
           opacity: toast.anim,
-          transform: [
-            {
-              translateY: toast.anim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }),
-            },
-          ],
+          transform: [{ translateY: toast.anim.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
         },
       ]}
     >
-      <Ionicons
-        name={isSuccess ? "checkmark-circle" : "alert-circle"}
-        size={18}
-        color="#FFFFFF"
-      />
+      <Ionicons name={isSuccess ? "checkmark-circle" : "alert-circle"} size={18} color="#FFFFFF" />
       <Text style={localStyles(colors).toastText}>{toast.message}</Text>
     </Animated.View>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Skeleton loader
-// ---------------------------------------------------------------------------
 
 function SkeletonBlock({ colors, width, height, style }: { colors: any; width: number | string; height: number; style?: any }) {
   const pulse = useRef(new Animated.Value(0.4)).current;
@@ -310,358 +205,34 @@ function SkeletonBlock({ colors, width, height, style }: { colors: any; width: n
   }, [pulse]);
 
   return (
-    <Animated.View
-      style={[
-        { width, height, borderRadius: 8, backgroundColor: colors.border ?? "#E2E5EA", opacity: pulse },
-        style,
-      ]}
-    />
+    <Animated.View style={[{ width, height, borderRadius: 8, backgroundColor: colors.border ?? "#E2E5EA", opacity: pulse }, style]} />
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main component
+// Small shared bits
 // ---------------------------------------------------------------------------
 
-export default function ManageAdministratorsScreen() {
-  const { palette: colors } = useTheme();
-  const { admin: authedAdmin } = useAdminAuth();
-  const { width } = useWindowDimensions();
-  const isMobile = width < 768;
-
-  const isSuperAdmin = authedAdmin?.role === "super_admin";
-
-  const sidebarUser = {
-    name: (authedAdmin as any)?.fullName ?? (authedAdmin as any)?.name ?? "Admin",
-    role: (isSuperAdmin ? "super_admin" : "admin") as "super_admin" | "admin",
-    profilePicture: (authedAdmin as any)?.profilePicture ?? null,
-  };
-
-  const styles = useMemo(() => localStyles(colors), [colors]);
-  const toast = useToast();
-
-  const [loading, setLoading] = useState(true);
-  const [admins, setAdmins] = useState<Administrator[]>([]);
-  const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState("All");
-  const [filterOpen, setFilterOpen] = useState(false);
-
-  const [viewTarget, setViewTarget] = useState<Administrator | null>(null);
-  const [editTarget, setEditTarget] = useState<Administrator | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Administrator | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-
-  const loadAdmins = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await adminService.getAdministrators();
-      setAdmins(data);
-    } catch (e) {
-      toast.show("Could not load administrators. Please try again.", "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [toast.show]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    loadAdmins();
-  }, [isSuperAdmin, loadAdmins]);
-
-  const [filtered, setFiltered] = useState<Administrator[]>([]);
-  useEffect(() => {
-    if (!isSuperAdmin) return;
-    let mounted = true;
-    adminService
-      .searchAdministrators(admins, query)
-      .then((res) => {
-        if (mounted) setFiltered(res);
-      })
-      .catch(() => {
-        if (mounted) toast.show("Search failed. Please try again.", "error");
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [query, isSuperAdmin]);
-
-  useEffect(() => {
-    setFiltered(admins);
-  }, [admins]);
-
-  const roleFiltered = useMemo(() => {
-    if (roleFilter === "All") return filtered;
-    return filtered.filter((a) => a.role === roleFilter);
-  }, [filtered, roleFilter]);
-
-  const stats = useMemo(() => {
-    return {
-      total: admins.length,
-      active: admins.filter((a) => a.status === "Active").length,
-      pending: 0,
-    };
-  }, [admins]);
-
-  const handleGoBack = useCallback(() => {
-    try {
-      const { router } = require("expo-router");
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace("/admin/dashboard");
-      }
-    } catch {
-      // no-op
-    }
-  }, []);
-
-  if (!isSuperAdmin) {
-    return (
-      <AdminLayout title="Manage Administrators" user={sidebarUser}>
-        <AccessDeniedView colors={colors} onGoBack={handleGoBack} />
-      </AdminLayout>
-    );
-  }
-
-  const handleSaveEdit = async (updated: Administrator) => {
-    // No try/catch here on purpose — EditAdminModal needs the rejection to
-    // reach its own handleSave so it can show "username taken" / "email
-    // taken" inline instead of a generic toast. It still shows a generic
-    // toast itself for anything that isn't a field-level error.
-    const saved = await adminService.updateAdministrator(updated.id, updated);
-    setAdmins((prev) => prev.map((a) => (a.id === saved.id ? saved : a)));
-    setEditTarget(null);
-    toast.show("Administrator updated successfully.");
-  };
-
-  const handleCreate = async (payload: Partial<Administrator> & { password: string }) => {
-    // Same reasoning as handleSaveEdit above — AddAdminModal's handleSubmit
-    // catches this to show inline field errors and jump back to step 0.
-    const created = await adminService.createAdministrator(payload);
-    setAdmins((prev) => [created, ...prev]);
-    setAddOpen(false);
-    toast.show("Administrator created successfully.");
-  };
-
-  const handleDeleteConfirmed = async (id: string) => {
-    try {
-      await adminService.deleteAdministrator(id);
-      setAdmins((prev) => prev.filter((a) => a.id !== id));
-      setDeleteTarget(null);
-      toast.show("Administrator deleted successfully.");
-    } catch (e) {
-      toast.show("Could not delete this administrator. Please try again.", "error");
-    }
-  };
-
+function Badge({ colors, bg, fg, text }: { colors: any; bg: string; fg: string; text: string }) {
   return (
-    <AdminLayout title="Manage Administrators" user={sidebarUser}>
-      <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.headerRow, isMobile && styles.headerRowMobile]}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.pageTitle}>Manage Administrators</Text>
-            <Text style={styles.pageSubtitle}>
-              Create, manage and organize administrator accounts and access.
-            </Text>
-          </View>
-          <Pressable
-            style={[styles.primaryButton, isMobile && styles.fullWidthButton]}
-            onPress={() => setAddOpen(true)}
-          >
-            <Ionicons name="add" size={18} color={"#FFFFFF"} />
-            <Text style={styles.primaryButtonText}>Add Administrator</Text>
-          </Pressable>
-        </View>
-
-        <View style={[styles.statsRow, isMobile && styles.statsRowMobile]}>
-          <StatCard colors={colors} icon="people" label="Total Administrators" value={stats.total} />
-          <StatCard colors={colors} icon="checkmark-circle" label="Active Administrators" value={stats.active} />
-          <StatCard colors={colors} icon="mail-unread" label="Pending Invitations" value={stats.pending} />
-        </View>
-
-        <View style={[styles.toolbarRow, isMobile && styles.toolbarRowMobile]}>
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={18} color={colors.muted} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search administrators..."
-              placeholderTextColor={colors.muted}
-              style={styles.searchInput}
-            />
-            {query.length > 0 && (
-              <Pressable onPress={() => setQuery("")}>
-                <Ionicons name="close-circle" size={16} color={colors.muted} />
-              </Pressable>
-            )}
-          </View>
-
-          <View style={{ position: "relative" }}>
-            <Pressable style={styles.filterButton} onPress={() => setFilterOpen((v) => !v)}>
-              <Text style={styles.filterButtonText}>{roleFilter}</Text>
-              <Ionicons name="chevron-down" size={16} color={colors.text} />
-            </Pressable>
-            {filterOpen && (
-              <View style={styles.filterDropdown}>
-                {FILTER_ROLES.map((r) => (
-                  <Pressable
-                    key={r}
-                    style={styles.filterOption}
-                    onPress={() => {
-                      setRoleFilter(r);
-                      setFilterOpen(false);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.filterOptionText,
-                        roleFilter === r && { color: colors.primary, fontWeight: "600" },
-                      ]}
-                    >
-                      {r}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-          </View>
-        </View>
-
-        {loading ? (
-          <View style={styles.card}>
-            {[...Array(5)].map((_, i) => (
-              <View key={i} style={styles.skeletonRow}>
-                <SkeletonBlock colors={colors} width={40} height={40} style={{ borderRadius: 20 }} />
-                <View style={{ flex: 1, gap: 6 }}>
-                  <SkeletonBlock colors={colors} width="60%" height={12} />
-                  <SkeletonBlock colors={colors} width="40%" height={10} />
-                </View>
-                <SkeletonBlock colors={colors} width={70} height={22} style={{ borderRadius: 11 }} />
-              </View>
-            ))}
-          </View>
-        ) : roleFiltered.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="people-outline" size={48} color={colors.muted} />
-            <Text style={styles.emptyTitle}>No administrators found.</Text>
-            <Text style={styles.emptySubtitle}>
-              Create your first administrator to get started.
-            </Text>
-          </View>
-        ) : isMobile ? (
-          <View style={{ gap: 12 }}>
-            {roleFiltered.map((admin) => (
-              <AdminCard
-                key={admin.id}
-                admin={admin}
-                colors={colors}
-                onView={() => setViewTarget(admin)}
-                onEdit={() => setEditTarget(admin)}
-                onDelete={() => setDeleteTarget(admin)}
-              />
-            ))}
-          </View>
-        ) : (
-          <View style={styles.card}>
-            <View style={styles.tableHeaderRow}>
-              <Text style={[styles.tableHeaderCell, { flex: 2.2 }]}>Administrator</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Department</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1.5 }]}>Role</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Status</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1.3 }]}>Last Login</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 1, textAlign: "right" }]}>Actions</Text>
-            </View>
-            {roleFiltered.map((admin) => (
-              <View key={admin.id} style={styles.tableRow}>
-                <View style={[styles.adminCell, { flex: 2.2 }]}>
-                  <Avatar admin={admin} colors={colors} size={36} />
-                  <View>
-                    <Text style={styles.adminName}>
-                      {admin.firstName} {admin.lastName}
-                    </Text>
-                    <Text style={styles.adminUsername}>@{admin.username}</Text>
-                  </View>
-                </View>
-                <Text style={[styles.tableCellText, { flex: 1.5 }]}>{admin.department || "—"}</Text>
-                <View style={{ flex: 1.5 }}>
-                  <Badge colors={colors} {...roleBadgeColor(colors, admin.role)} text={admin.role} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Badge colors={colors} {...statusColor(colors, admin.status)} text={admin.status} />
-                </View>
-                <Text style={[styles.tableCellText, { flex: 1.3 }]}>{admin.lastLogin}</Text>
-                <View style={[styles.actionsCell, { flex: 1 }]}>
-                  <Pressable onPress={() => setViewTarget(admin)} style={styles.iconButton}>
-                    <Ionicons name="eye-outline" size={18} color={colors.muted} />
-                  </Pressable>
-                  <Pressable onPress={() => setEditTarget(admin)} style={styles.iconButton}>
-                    <Ionicons name="create-outline" size={18} color={colors.primary} />
-                  </Pressable>
-                  <Pressable onPress={() => setDeleteTarget(admin)} style={styles.iconButton}>
-                    <Ionicons name="trash-outline" size={18} color={colors.danger ?? "#D64545"} />
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
-
-      <ToastView colors={colors} toast={toast} />
-
-      {viewTarget && (
-        <ViewAdminModal admin={viewTarget} colors={colors} isMobile={isMobile} onClose={() => setViewTarget(null)} />
-      )}
-
-      {editTarget && (
-        <EditAdminModal
-          admin={editTarget}
-          colors={colors}
-          isMobile={isMobile}
-          onClose={() => setEditTarget(null)}
-          onSave={handleSaveEdit}
-        />
-      )}
-
-      {deleteTarget && (
-        <DeleteAdminModal
-          admin={deleteTarget}
-          colors={colors}
-          onClose={() => setDeleteTarget(null)}
-          onConfirm={handleDeleteConfirmed}
-        />
-      )}
-
-      {addOpen && (
-        <AddAdminModal
-          colors={colors}
-          isMobile={isMobile}
-          canAssignSuperAdmin={isSuperAdmin}
-          onClose={() => setAddOpen(false)}
-          onCreate={handleCreate}
-        />
-      )}
-      </View>
-    </AdminLayout>
+    <View style={{ backgroundColor: bg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, alignSelf: "flex-start" }}>
+      <Text style={{ color: fg, fontSize: 12, fontWeight: "600" }}>{text}</Text>
+    </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Reusable pieces
-// ---------------------------------------------------------------------------
+function statusColor(colors: any, status: VehicleStatus) {
+  switch (status) {
+    case "Available":
+      return { bg: colors.success + "1A", fg: colors.success ?? "#1E9E5A" };
+    case "Assigned":
+      return { bg: colors.primary + "1A", fg: colors.primary ?? "#0D4A8C" };
+    case "Maintenance":
+      return { bg: colors.warning + "1A", fg: colors.warning ?? "#B7791F" };
+  }
+}
 
-function StatCard({
-  colors,
-  icon,
-  label,
-  value,
-}: {
-  colors: any;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: number;
-}) {
+function StatCard({ colors, icon, label, value }: { colors: any; icon: keyof typeof Ionicons.glyphMap; label: string; value: number }) {
   const styles = localStyles(colors);
   return (
     <View style={styles.statCard}>
@@ -676,31 +247,26 @@ function StatCard({
   );
 }
 
-function Avatar({ admin, colors, size = 40 }: { admin: Administrator; colors: any; size?: number }) {
+function VehiclePhoto({ vehicle, colors, size = 40 }: { vehicle: VehicleRecord; colors: any; size?: number }) {
   const styles = localStyles(colors);
+  if (vehicle.image) {
+    return <Image source={{ uri: vehicle.image }} style={{ width: size, height: size, borderRadius: 10 }} />;
+  }
   return (
-    <View style={[styles.avatarFallback, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[styles.avatarInitials, { fontSize: size * 0.36 }]}>{initialsOf(admin)}</Text>
+    <View style={[styles.vehiclePhotoFallback, { width: size, height: size, borderRadius: 10 }]}>
+      <Ionicons name="car-outline" size={size * 0.5} color={colors.primary} />
     </View>
   );
 }
 
-function Badge({ colors, bg, fg, text }: { colors: any; bg: string; fg: string; text: string }) {
-  return (
-    <View style={{ backgroundColor: bg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, alignSelf: "flex-start" }}>
-      <Text style={{ color: fg, fontSize: 12, fontWeight: "600" }}>{text}</Text>
-    </View>
-  );
-}
-
-function AdminCard({
-  admin,
+function VehicleCard({
+  vehicle,
   colors,
   onView,
   onEdit,
   onDelete,
 }: {
-  admin: Administrator;
+  vehicle: VehicleRecord;
   colors: any;
   onView: () => void;
   onEdit: () => void;
@@ -710,21 +276,20 @@ function AdminCard({
   return (
     <View style={styles.mobileCard}>
       <View style={styles.mobileCardTop}>
-        <Avatar admin={admin} colors={colors} size={44} />
+        <VehiclePhoto vehicle={vehicle} colors={colors} size={44} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.adminName}>
-            {admin.firstName} {admin.lastName}
+          <Text style={styles.vehicleName}>
+            {vehicle.brand} {vehicle.model}
           </Text>
-          <Text style={styles.adminUsername}>@{admin.username}</Text>
+          <Text style={styles.vehiclePlate}>{vehicle.plateNumber}</Text>
         </View>
       </View>
       <View style={styles.mobileBadgeRow}>
-        <Badge colors={colors} {...roleBadgeColor(colors, admin.role)} text={admin.role} />
-        <Badge colors={colors} {...statusColor(colors, admin.status)} text={admin.status} />
+        <Badge colors={colors} {...statusColor(colors, vehicle.status)} text={vehicle.status} />
       </View>
       <View style={styles.mobileMetaRow}>
-        <Text style={styles.tableCellText}>{admin.department || "No dept"}</Text>
-        <Text style={styles.tableCellText}>{admin.lastLogin}</Text>
+        <Text style={styles.tableCellText}>{vehicle.vehicleType}</Text>
+        <Text style={styles.tableCellText}>{vehicle.assignedDriver?.name ?? "Unassigned"}</Text>
       </View>
       <View style={styles.mobileActionsRow}>
         <Pressable onPress={onView} style={styles.mobileActionButton}>
@@ -745,7 +310,7 @@ function AdminCard({
 }
 
 // ---------------------------------------------------------------------------
-// Modal shell
+// Modal shell + form primitives (identical pattern to manage-admins.tsx)
 // ---------------------------------------------------------------------------
 
 function ModalShell({
@@ -768,16 +333,8 @@ function ModalShell({
   const styles = localStyles(colors);
   return (
     <Modal visible={visible} animationType={isMobile ? "slide" : "fade"} transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.modalOverlay}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <View
-          style={[
-            styles.modalCard,
-            isMobile ? styles.modalCardMobile : { maxWidth, width: "92%", maxHeight: "88%" },
-          ]}
-        >
+      <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <View style={[styles.modalCard, isMobile ? styles.modalCardMobile : { maxWidth, width: "92%", maxHeight: "88%" }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>{title}</Text>
             <Pressable onPress={onClose} hitSlop={10}>
@@ -797,17 +354,8 @@ function FieldLabel({ colors, children }: { colors: any; children: React.ReactNo
   return <Text style={localStyles(colors).fieldLabel}>{children}</Text>;
 }
 
-function Input({
-  colors,
-  ...props
-}: React.ComponentProps<typeof TextInput> & { colors: any }) {
-  return (
-    <TextInput
-      placeholderTextColor={colors.muted}
-      style={localStyles(colors).input}
-      {...props}
-    />
-  );
+function Input({ colors, ...props }: React.ComponentProps<typeof TextInput> & { colors: any }) {
+  return <TextInput placeholderTextColor={colors.muted} style={localStyles(colors).input} {...props} />;
 }
 
 function InfoRow({ colors, label, value }: { colors: any; label: string; value: string }) {
@@ -819,212 +367,6 @@ function InfoRow({ colors, label, value }: { colors: any; label: string; value: 
     </View>
   );
 }
-
-// ---------------------------------------------------------------------------
-// View Administrator modal
-// ---------------------------------------------------------------------------
-
-function ViewAdminModal({
-  admin,
-  colors,
-  isMobile,
-  onClose,
-}: {
-  admin: Administrator;
-  colors: any;
-  isMobile: boolean;
-  onClose: () => void;
-}) {
-  const styles = localStyles(colors);
-  return (
-    <ModalShell colors={colors} isMobile={isMobile} visible title="Administrator Details" onClose={onClose}>
-      <View style={{ alignItems: "center", marginBottom: 16 }}>
-        <Avatar admin={admin} colors={colors} size={72} />
-        <Text style={[styles.adminName, { fontSize: 18, marginTop: 10 }]}>
-          {admin.firstName} {admin.lastName}
-        </Text>
-        <Text style={styles.adminUsername}>@{admin.username}</Text>
-      </View>
-      <InfoRow colors={colors} label="Department" value={admin.department || "—"} />
-      <InfoRow colors={colors} label="Role" value={admin.role} />
-      <InfoRow colors={colors} label="Email" value={admin.email} />
-      <InfoRow colors={colors} label="Phone Number" value={admin.phone} />
-      <InfoRow
-        colors={colors}
-        label="Permissions"
-        value={admin.permissions.length ? `${admin.permissions.length} granted` : "None"}
-      />
-      <InfoRow colors={colors} label="Date Created" value={admin.dateCreated} />
-      <InfoRow colors={colors} label="Last Login" value={admin.lastLogin} />
-      <View style={styles.infoRow}>
-        <Text style={styles.infoLabel}>Status</Text>
-        <Badge colors={colors} {...statusColor(colors, admin.status)} text={admin.status} />
-      </View>
-    </ModalShell>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Edit Administrator modal
-// ---------------------------------------------------------------------------
-
-function EditAdminModal({
-  admin,
-  colors,
-  isMobile,
-  onClose,
-  onSave,
-}: {
-  admin: Administrator;
-  colors: any;
-  isMobile: boolean;
-  onClose: () => void;
-  onSave: (updated: Administrator) => void;
-}) {
-  const styles = localStyles(colors);
-  const [form, setForm] = useState<Administrator>({ ...admin });
-  const [saving, setSaving] = useState(false);
-  const [roleOpen, setRoleOpen] = useState(false);
-  const [deptOpen, setDeptOpen] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{ username?: string; email?: string }>({});
-  const [formError, setFormError] = useState("");
-
-  const handleSave = async () => {
-    setSaving(true);
-    setFieldErrors({});
-    setFormError("");
-    try {
-      await onSave(form);
-    } catch (e) {
-      const apiErr = e instanceof ApiError ? e : null;
-      const errors: { username?: string; email?: string } = {};
-      if (apiErr?.errors?.username) errors.username = apiErr.errors.username[0];
-      if (apiErr?.errors?.email) errors.email = apiErr.errors.email[0];
-      if (errors.username || errors.email) {
-        setFieldErrors(errors);
-      } else {
-        setFormError(apiErr?.message ?? "Something went wrong. Please try again.");
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <ModalShell colors={colors} isMobile={isMobile} visible title="Edit Administrator" onClose={onClose}>
-      <View style={{ alignItems: "center", marginBottom: 16 }}>
-        <Avatar admin={form} colors={colors} size={72} />
-      </View>
-
-      <FieldLabel colors={colors}>Full Name</FieldLabel>
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Input
-          colors={colors}
-          style={[styles.input, { flex: 1 }]}
-          value={form.firstName}
-          onChangeText={(v) => setForm((f) => ({ ...f, firstName: v }))}
-          placeholder="First name"
-        />
-        <Input
-          colors={colors}
-          style={[styles.input, { flex: 1 }]}
-          value={form.lastName}
-          onChangeText={(v) => setForm((f) => ({ ...f, lastName: v }))}
-          placeholder="Last name"
-        />
-      </View>
-
-      <FieldLabel colors={colors}>Username</FieldLabel>
-      <Input
-        colors={colors}
-        value={form.username}
-        onChangeText={(v) => {
-          setForm((f) => ({ ...f, username: v }));
-          if (fieldErrors.username) setFieldErrors((f) => ({ ...f, username: undefined }));
-        }}
-      />
-      {!!fieldErrors.username && <Text style={styles.errorText}>{fieldErrors.username}</Text>}
-
-      <FieldLabel colors={colors}>Email</FieldLabel>
-      <Input
-        colors={colors}
-        value={form.email}
-        onChangeText={(v) => {
-          setForm((f) => ({ ...f, email: v }));
-          if (fieldErrors.email) setFieldErrors((f) => ({ ...f, email: undefined }));
-        }}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      {!!fieldErrors.email && <Text style={styles.errorText}>{fieldErrors.email}</Text>}
-
-      <FieldLabel colors={colors}>Phone Number</FieldLabel>
-      <Input
-        colors={colors}
-        value={form.phone}
-        onChangeText={(v) => setForm((f) => ({ ...f, phone: v }))}
-        keyboardType="phone-pad"
-      />
-
-      <FieldLabel colors={colors}>Department</FieldLabel>
-      <Dropdown
-        colors={colors}
-        open={deptOpen}
-        setOpen={setDeptOpen}
-        value={form.department || "Select Department"}
-        options={DEPARTMENTS}
-        onSelect={(v) => setForm((f) => ({ ...f, department: v }))}
-      />
-
-      <FieldLabel colors={colors}>Role</FieldLabel>
-      <Dropdown
-        colors={colors}
-        open={roleOpen}
-        setOpen={setRoleOpen}
-        value={form.role}
-        options={ROLES}
-        onSelect={(v) => setForm((f) => ({ ...f, role: v as Role }))}
-      />
-
-      <FieldLabel colors={colors}>Status</FieldLabel>
-      <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-        {(["Active", "Inactive"] as Status[]).map((s) => (
-          <Pressable
-            key={s}
-            onPress={() => setForm((f) => ({ ...f, status: s }))}
-            style={[
-              styles.statusChip,
-              form.status === s && { backgroundColor: colors.primary, borderColor: colors.primary },
-            ]}
-          >
-            <Text style={[styles.statusChipText, form.status === s && { color: "#FFFFFF" }]}>
-              {s}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {!!formError && <Text style={styles.errorText}>{formError}</Text>}
-
-      <View style={styles.modalFooterRow}>
-        <Pressable style={styles.secondaryButton} onPress={onClose}>
-          <Text style={styles.secondaryButtonText}>Cancel</Text>
-        </Pressable>
-        <Pressable style={styles.primaryButton} onPress={handleSave} disabled={saving}>
-          {saving ? (
-            <ActivityIndicator color={"#FFFFFF"} size="small" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Save Changes</Text>
-          )}
-        </Pressable>
-      </View>
-    </ModalShell>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Simple dropdown used across modals
-// ---------------------------------------------------------------------------
 
 function Dropdown({
   colors,
@@ -1050,62 +392,311 @@ function Dropdown({
       </Pressable>
       {open && (
         <View style={styles.dropdownList}>
-          {options.map((opt) => (
-            <Pressable
-              key={opt}
-              style={styles.dropdownItem}
-              onPress={() => {
-                onSelect(opt);
-                setOpen(false);
-              }}
-            >
-              <Text style={[styles.dropdownItemText, opt === value && { color: colors.primary, fontWeight: "600" }]}>
-                {opt}
-              </Text>
-            </Pressable>
-          ))}
+          <ScrollView style={{ maxHeight: 220 }}>
+            {options.map((opt) => (
+              <Pressable
+                key={opt}
+                style={styles.dropdownItem}
+                onPress={() => {
+                  onSelect(opt);
+                  setOpen(false);
+                }}
+              >
+                <Text style={[styles.dropdownItemText, opt === value && { color: colors.primary, fontWeight: "600" }]}>{opt}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </View>
       )}
     </View>
   );
 }
 
+/**
+ * Handles picking an image, uploading it to Cloudinary via
+ * POST /admin/upload-image, and showing a preview. Only ever hands the
+ * parent the final hosted URL — matches the contract every
+ * ImageUploadController-backed field in this app already relies on
+ * (avatarUrl, profileImage, licenseFrontImage, etc.).
+ */
+function ImagePickerField({
+  colors,
+  label,
+  value,
+  onChange,
+}: {
+  colors: any;
+  label: string;
+  value: string | null;
+  onChange: (url: string | null) => void;
+}) {
+  const styles = localStyles(colors);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handlePick = async () => {
+    setError("");
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setError("Photo library permission is required.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setUploading(true);
+    try {
+      // Force JPEG output regardless of the source format — iOS photo
+      // library picks come back as HEIC by default, which the backend's
+      // `image`/`mimes` validation rejects outright.
+      const converted = await ImageManipulator.manipulateAsync(
+        result.assets[0].uri,
+        [],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const url = await vehicleService.uploadImage(converted.uri);
+      onChange(url);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not upload image. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <FieldLabel colors={colors}>{label}</FieldLabel>
+      <Pressable style={styles.imagePickerBox} onPress={handlePick} disabled={uploading}>
+        {uploading ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : value ? (
+          <Image source={{ uri: value }} style={styles.imagePickerPreview} />
+        ) : (
+          <View style={{ alignItems: "center" }}>
+            <Ionicons name="camera-outline" size={26} color={colors.muted} />
+            <Text style={styles.helperText}>Tap to upload</Text>
+          </View>
+        )}
+      </Pressable>
+      {!!value && !uploading && (
+        <Pressable onPress={() => onChange(null)} style={{ marginTop: 6 }}>
+          <Text style={[styles.helperText, { color: colors.danger ?? "#D64545" }]}>Remove photo</Text>
+        </Pressable>
+      )}
+      {!!error && <Text style={styles.errorText}>{error}</Text>}
+    </View>
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Delete Administrator modal
+// View Vehicle modal — full details + assigned driver + assign/unassign
 // ---------------------------------------------------------------------------
 
-function DeleteAdminModal({
-  admin,
+function ViewVehicleModal({
+  vehicle,
+  colors,
+  isMobile,
+  onClose,
+  onAssign,
+  onUnassign,
+  busy,
+}: {
+  vehicle: VehicleRecord;
+  colors: any;
+  isMobile: boolean;
+  onClose: () => void;
+  onAssign: () => void;
+  onUnassign: () => void;
+  busy: boolean;
+}) {
+  const styles = localStyles(colors);
+  return (
+    <ModalShell colors={colors} isMobile={isMobile} visible title="Vehicle Details" onClose={onClose}>
+      <View style={{ alignItems: "center", marginBottom: 16 }}>
+        <VehiclePhoto vehicle={vehicle} colors={colors} size={84} />
+        <Text style={[styles.vehicleName, { fontSize: 18, marginTop: 10 }]}>
+          {vehicle.brand} {vehicle.model}
+        </Text>
+        <Text style={styles.vehiclePlate}>{vehicle.plateNumber}</Text>
+      </View>
+
+      <InfoRow colors={colors} label="Type" value={vehicle.vehicleType} />
+      <InfoRow colors={colors} label="Color" value={vehicle.color || "—"} />
+      <InfoRow colors={colors} label="Engine Number" value={vehicle.engineNumber || "—"} />
+      <InfoRow colors={colors} label="Chassis Number" value={vehicle.chassisNumber || "—"} />
+      <InfoRow colors={colors} label="Date Added" value={vehicle.dateAdded} />
+      <View style={styles.infoRow}>
+        <Text style={styles.infoLabel}>Status</Text>
+        <Badge colors={colors} {...statusColor(colors, vehicle.status)} text={vehicle.status} />
+      </View>
+
+      {!!vehicle.registrationImage && (
+        <View style={{ marginTop: 14 }}>
+          <FieldLabel colors={colors}>Registration Document</FieldLabel>
+          <Image source={{ uri: vehicle.registrationImage }} style={styles.documentPreview} resizeMode="contain" />
+        </View>
+      )}
+
+      <View style={{ marginTop: 18 }}>
+        <FieldLabel colors={colors}>Assigned Driver</FieldLabel>
+        {vehicle.assignedDriver ? (
+          <View style={styles.assignedDriverCard}>
+            <View style={styles.assignedDriverAvatar}>
+              <Text style={styles.avatarInitials}>{vehicle.assignedDriver.name.charAt(0).toUpperCase()}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.adminName}>{vehicle.assignedDriver.name}</Text>
+              <Text style={styles.adminUsername}>{vehicle.assignedDriver.driverId}</Text>
+              <Text style={styles.helperText}>{vehicle.assignedDriver.phone || vehicle.assignedDriver.email}</Text>
+            </View>
+            <Pressable style={styles.secondaryButton} onPress={onUnassign} disabled={busy}>
+              {busy ? <ActivityIndicator size="small" color={colors.text} /> : <Text style={styles.secondaryButtonText}>Unassign</Text>}
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.unassignedRow}>
+            <Text style={styles.helperText}>No driver currently assigned to this vehicle.</Text>
+            <Pressable style={styles.primaryButton} onPress={onAssign} disabled={busy}>
+              {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Assign Driver</Text>}
+            </Pressable>
+          </View>
+        )}
+      </View>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assign Driver modal
+// ---------------------------------------------------------------------------
+
+function AssignDriverModal({
+  colors,
+  isMobile,
+  onClose,
+  onConfirm,
+}: {
+  colors: any;
+  isMobile: boolean;
+  onClose: () => void;
+  onConfirm: (driverId: string) => Promise<void>;
+}) {
+  const styles = localStyles(colors);
+  const [drivers, setDrivers] = useState<DriverOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    vehicleService
+      .getAssignableDrivers()
+      .then((res) => {
+        if (mounted) setDrivers(res);
+      })
+      .catch(() => {
+        if (mounted) setError("Could not load drivers. Please try again.");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleConfirm = async () => {
+    if (!selected) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await onConfirm(selected);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not assign this driver. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell colors={colors} isMobile={isMobile} visible title="Assign Driver" onClose={onClose}>
+      {loading ? (
+        <View style={{ paddingVertical: 24, alignItems: "center" }}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : drivers.length === 0 ? (
+        <Text style={styles.helperText}>No drivers found.</Text>
+      ) : (
+        <View style={{ gap: 8 }}>
+          {drivers.map((d) => (
+            <Pressable
+              key={d.id}
+              style={[styles.driverOptionRow, selected === d.id && { borderColor: colors.primary }]}
+              onPress={() => setSelected(d.id)}
+            >
+              <View style={styles.checkbox}>
+                {selected === d.id && <Ionicons name="checkmark" size={13} color={colors.primary} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.adminName}>{d.name}</Text>
+                <Text style={styles.helperText}>
+                  {d.driverId}
+                  {d.currentVehiclePlate ? ` · Currently on ${d.currentVehiclePlate}` : ""}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {!!error && <Text style={styles.errorText}>{error}</Text>}
+
+      <View style={styles.modalFooterRow}>
+        <Pressable style={styles.secondaryButton} onPress={onClose}>
+          <Text style={styles.secondaryButtonText}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.primaryButton, (!selected || submitting) && { opacity: 0.5 }]}
+          disabled={!selected || submitting}
+          onPress={handleConfirm}
+        >
+          {submitting ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.primaryButtonText}>Confirm Assignment</Text>}
+        </Pressable>
+      </View>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete Vehicle modal
+// ---------------------------------------------------------------------------
+
+function DeleteVehicleModal({
+  vehicle,
   colors,
   onClose,
   onConfirm,
 }: {
-  admin: Administrator;
+  vehicle: VehicleRecord;
   colors: any;
   onClose: () => void;
-  onConfirm: (id: string) => void;
+  onConfirm: (id: string) => Promise<void>;
 }) {
   const styles = localStyles(colors);
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [checking, setChecking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const handleDelete = async () => {
-    setChecking(true);
+    setDeleting(true);
     setError("");
     try {
-      const ok = await adminService.confirmPassword(password);
-      if (!ok) {
-        setError("Incorrect password. Please try again.");
-        setChecking(false);
-        return;
-      }
-      await onConfirm(admin.id);
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setChecking(false);
+      await onConfirm(vehicle.id);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Something went wrong. Please try again.");
+      setDeleting(false);
     }
   };
 
@@ -1114,61 +705,32 @@ function DeleteAdminModal({
       <View style={styles.modalOverlay}>
         <View style={[styles.modalCard, { width: "90%", maxWidth: 440 }]}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Delete Administrator</Text>
+            <Text style={styles.modalTitle}>Delete Vehicle</Text>
             <Pressable onPress={onClose} hitSlop={10}>
               <Ionicons name="close" size={22} color={colors.text} />
             </Pressable>
           </View>
           <View style={{ padding: 20 }}>
             <View style={styles.deleteAdminPreview}>
-              <Avatar admin={admin} colors={colors} size={44} />
+              <VehiclePhoto vehicle={vehicle} colors={colors} size={44} />
               <View>
                 <Text style={styles.adminName}>
-                  {admin.firstName} {admin.lastName}
+                  {vehicle.brand} {vehicle.model}
                 </Text>
-                <Text style={styles.adminUsername}>@{admin.username}</Text>
+                <Text style={styles.adminUsername}>{vehicle.plateNumber}</Text>
               </View>
             </View>
             <Text style={styles.deleteWarning}>
-              This action cannot be undone. This will permanently remove this administrator's access.
+              This action cannot be undone. This will permanently remove this vehicle
+              {vehicle.assignedDriver ? ` and unassign it from ${vehicle.assignedDriver.name}` : ""}.
             </Text>
-
-            <FieldLabel colors={colors}>Enter your password to confirm deletion</FieldLabel>
-            <View style={styles.passwordRow}>
-              <TextInput
-                value={password}
-                onChangeText={(v) => {
-                  setPassword(v);
-                  setError("");
-                }}
-                secureTextEntry={!showPassword}
-                placeholder="Password"
-                placeholderTextColor={colors.muted}
-                style={[styles.input, { flex: 1, marginBottom: 0 }]}
-              />
-              <Pressable onPress={() => setShowPassword((v) => !v)} style={styles.eyeButton}>
-                <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.muted} />
-              </Pressable>
-            </View>
             {!!error && <Text style={styles.errorText}>{error}</Text>}
-
             <View style={styles.modalFooterRow}>
               <Pressable style={styles.secondaryButton} onPress={onClose}>
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </Pressable>
-              <Pressable
-                style={[
-                  styles.dangerButton,
-                  (!password || checking) && { opacity: 0.5 },
-                ]}
-                disabled={!password || checking}
-                onPress={handleDelete}
-              >
-                {checking ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.dangerButtonText}>Delete Administrator</Text>
-                )}
+              <Pressable style={[styles.dangerButton, deleting && { opacity: 0.5 }]} disabled={deleting} onPress={handleDelete}>
+                {deleting ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.dangerButtonText}>Delete Vehicle</Text>}
               </Pressable>
             </View>
           </View>
@@ -1179,81 +741,154 @@ function DeleteAdminModal({
 }
 
 // ---------------------------------------------------------------------------
-// Add Administrator modal — multi-step wizard
+// Edit Vehicle modal — single page
 // ---------------------------------------------------------------------------
 
-const STEP_LABELS = ["Personal Info", "Department", "Role", "Permissions", "Review"];
-
-function AddAdminModal({
+function EditVehicleModal({
+  vehicle,
   colors,
   isMobile,
-  canAssignSuperAdmin,
+  onClose,
+  onSave,
+}: {
+  vehicle: VehicleRecord;
+  colors: any;
+  isMobile: boolean;
+  onClose: () => void;
+  onSave: (updated: VehicleRecord) => Promise<void>;
+}) {
+  const styles = localStyles(colors);
+  const [form, setForm] = useState<VehicleRecord>({ ...vehicle });
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{ plateNumber?: string }>({});
+  const [formError, setFormError] = useState("");
+
+  const handleSave = async () => {
+    setSaving(true);
+    setFieldErrors({});
+    setFormError("");
+    try {
+      await onSave(form);
+    } catch (e) {
+      const apiErr = e instanceof ApiError ? e : null;
+      if (apiErr?.errors?.plateNumber) {
+        setFieldErrors({ plateNumber: apiErr.errors.plateNumber[0] });
+      } else {
+        setFormError(apiErr?.message ?? "Something went wrong. Please try again.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalShell colors={colors} isMobile={isMobile} visible title="Edit Vehicle" onClose={onClose}>
+      <ImagePickerField colors={colors} label="Vehicle Photo" value={form.image} onChange={(url) => setForm((f) => ({ ...f, image: url }))} />
+
+      <FieldLabel colors={colors}>Brand</FieldLabel>
+      <Input colors={colors} value={form.brand} onChangeText={(v) => setForm((f) => ({ ...f, brand: v }))} placeholder="e.g. Toyota" />
+
+      <FieldLabel colors={colors}>Model</FieldLabel>
+      <Input colors={colors} value={form.model} onChangeText={(v) => setForm((f) => ({ ...f, model: v }))} placeholder="e.g. Hiace" />
+
+      <FieldLabel colors={colors}>Vehicle Type</FieldLabel>
+      <Dropdown colors={colors} open={typeOpen} setOpen={setTypeOpen} value={form.vehicleType} options={VEHICLE_TYPES} onSelect={(v) => setForm((f) => ({ ...f, vehicleType: v }))} />
+
+      <FieldLabel colors={colors}>Plate Number</FieldLabel>
+      <Input
+        colors={colors}
+        value={form.plateNumber}
+        onChangeText={(v) => {
+          setForm((f) => ({ ...f, plateNumber: v }));
+          if (fieldErrors.plateNumber) setFieldErrors({});
+        }}
+        placeholder="e.g. EDS-101-KY"
+        autoCapitalize="characters"
+      />
+      {!!fieldErrors.plateNumber && <Text style={styles.errorText}>{fieldErrors.plateNumber}</Text>}
+
+      <FieldLabel colors={colors}>Color</FieldLabel>
+      <Input colors={colors} value={form.color} onChangeText={(v) => setForm((f) => ({ ...f, color: v }))} placeholder="e.g. Kayora Blue" />
+
+      <FieldLabel colors={colors}>Engine Number</FieldLabel>
+      <Input colors={colors} value={form.engineNumber} onChangeText={(v) => setForm((f) => ({ ...f, engineNumber: v }))} />
+
+      <FieldLabel colors={colors}>Chassis Number</FieldLabel>
+      <Input colors={colors} value={form.chassisNumber} onChangeText={(v) => setForm((f) => ({ ...f, chassisNumber: v }))} />
+
+      <ImagePickerField
+        colors={colors}
+        label="Registration Document"
+        value={form.registrationImage}
+        onChange={(url) => setForm((f) => ({ ...f, registrationImage: url }))}
+      />
+
+      {!!formError && <Text style={styles.errorText}>{formError}</Text>}
+
+      <View style={styles.modalFooterRow}>
+        <Pressable style={styles.secondaryButton} onPress={onClose}>
+          <Text style={styles.secondaryButtonText}>Cancel</Text>
+        </Pressable>
+        <Pressable style={styles.primaryButton} onPress={handleSave} disabled={saving}>
+          {saving ? <ActivityIndicator color={"#FFFFFF"} size="small" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+        </Pressable>
+      </View>
+    </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Add Vehicle modal — multi-step wizard (same pattern as AddAdminModal)
+// ---------------------------------------------------------------------------
+
+const STEP_LABELS = ["Vehicle Info", "Photos", "Assign Driver", "Review"];
+
+function AddVehicleModal({
+  colors,
+  isMobile,
   onClose,
   onCreate,
 }: {
   colors: any;
   isMobile: boolean;
-  canAssignSuperAdmin: boolean;
   onClose: () => void;
-  onCreate: (payload: Partial<Administrator> & { password: string }) => void;
+  onCreate: (payload: Partial<VehicleRecord> & { assignedDriverId?: string }) => Promise<void>;
 }) {
   const styles = localStyles(colors);
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [brand, setBrand] = useState("");
+  const [model, setModel] = useState("");
+  const [vehicleType, setVehicleType] = useState(VEHICLE_TYPES[0]);
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [plateNumber, setPlateNumber] = useState("");
+  const [color, setColor] = useState("");
+  const [engineNumber, setEngineNumber] = useState("");
+  const [chassisNumber, setChassisNumber] = useState("");
 
-  const [department, setDepartment] = useState(DEPARTMENTS[0]);
-  const [deptOpen, setDeptOpen] = useState(false);
+  const [image, setImage] = useState<string | null>(null);
+  const [registrationImage, setRegistrationImage] = useState<string | null>(null);
 
-  const [role, setRole] = useState<Role>("Administrator");
-  const [roleOpen, setRoleOpen] = useState(false);
+  const [drivers, setDrivers] = useState<DriverOption[]>([]);
+  const [driversLoading, setDriversLoading] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
 
-  const [permissions, setPermissions] = useState<Set<string>>(new Set());
-
-  const [fieldErrors, setFieldErrors] = useState<{ username?: string; email?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ plateNumber?: string }>({});
   const [submitError, setSubmitError] = useState("");
-  const [checkingAvailability, setCheckingAvailability] = useState(false);
 
-  const togglePermission = (key: string) => {
-    setPermissions((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const canGoNextFromDetails = brand.trim() && model.trim() && plateNumber.trim();
 
-  const canGoNextFromPersonal =
-    firstName.trim() && lastName.trim() && username.trim() && email.trim() && password.trim().length >= 8;
-
-  const handleNextFromPersonal = async () => {
-    setFieldErrors({});
-    setCheckingAvailability(true);
-    try {
-      const result = await adminService.checkAvailability(username, email);
-      const errors: { username?: string; email?: string } = {};
-      if (result.usernameTaken) errors.username = "This username is already taken.";
-      if (result.emailTaken) errors.email = "This email is already in use.";
-      if (errors.username || errors.email) {
-        setFieldErrors(errors);
-        return;
-      }
-      setStep((s) => s + 1);
-    } catch {
-      // Don't block navigation on a network hiccup — final submit still
-      // catches a real duplicate via the backend's unique validation.
-      setStep((s) => s + 1);
-    } finally {
-      setCheckingAvailability(false);
-    }
-  };
+  useEffect(() => {
+    if (step !== 2) return;
+    setDriversLoading(true);
+    vehicleService
+      .getAssignableDrivers()
+      .then(setDrivers)
+      .catch(() => setDrivers([]))
+      .finally(() => setDriversLoading(false));
+  }, [step]);
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -1261,23 +896,21 @@ function AddAdminModal({
     setSubmitError("");
     try {
       await onCreate({
-        firstName,
-        lastName,
-        username,
-        email,
-        phone,
-        department,
-        role,
-        permissions: Array.from(permissions),
-        password,
+        brand,
+        model,
+        vehicleType,
+        plateNumber,
+        color,
+        engineNumber,
+        chassisNumber,
+        image,
+        registrationImage,
+        assignedDriverId: selectedDriverId ?? undefined,
       });
     } catch (e) {
       const apiErr = e instanceof ApiError ? e : null;
-      const errors: { username?: string; email?: string } = {};
-      if (apiErr?.errors?.username) errors.username = apiErr.errors.username[0];
-      if (apiErr?.errors?.email) errors.email = apiErr.errors.email[0];
-      if (errors.username || errors.email) {
-        setFieldErrors(errors);
+      if (apiErr?.errors?.plateNumber) {
+        setFieldErrors({ plateNumber: apiErr.errors.plateNumber[0] });
         setStep(0);
       } else {
         setSubmitError(apiErr?.message ?? "Something went wrong. Please try again.");
@@ -1287,29 +920,31 @@ function AddAdminModal({
     }
   };
 
-  const tempAdmin: Administrator = {
+  const tempVehicle: VehicleRecord = {
     id: "",
-    firstName,
-    lastName,
-    username,
-    email,
-    phone,
-    department,
-    role,
-    status: "Active",
-    lastLogin: "",
-    dateCreated: "",
-    permissions: Array.from(permissions),
+    brand,
+    model,
+    vehicleType,
+    plateNumber,
+    engineNumber,
+    chassisNumber,
+    color,
+    image,
+    registrationImage,
+    status: "Available",
+    assignedDriverId: selectedDriverId,
+    assignedDriver: null,
+    dateAdded: "",
   };
 
   return (
-    <ModalShell colors={colors} isMobile={isMobile} visible title="Add Administrator" onClose={onClose} maxWidth={640}>
+    <ModalShell colors={colors} isMobile={isMobile} visible title="Add Vehicle" onClose={onClose} maxWidth={640}>
       <View style={styles.stepRow}>
         {STEP_LABELS.map((label, idx) => (
           <View key={label} style={{ alignItems: "center", flex: 1 }}>
             <View style={[styles.stepDot, idx <= step && { backgroundColor: colors.primary }]}>
               {idx < step ? (
-                <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
               ) : (
                 <Text style={[styles.stepDotText, idx <= step && { color: "#FFFFFF" }]}>{idx + 1}</Text>
               )}
@@ -1319,158 +954,111 @@ function AddAdminModal({
         ))}
       </View>
 
-      {/* Step 1: Personal Info */}
+      {/* Step 1: Vehicle Info */}
       {step === 0 && (
         <View>
           <View style={{ alignItems: "center", marginBottom: 16 }}>
-            <Avatar admin={tempAdmin} colors={colors} size={84} />
+            <VehiclePhoto vehicle={tempVehicle} colors={colors} size={84} />
           </View>
 
           <View style={isMobile ? undefined : { flexDirection: "row", gap: 10 }}>
             <View style={{ flex: 1 }}>
-              <FieldLabel colors={colors}>First Name</FieldLabel>
-              <Input colors={colors} value={firstName} onChangeText={setFirstName} placeholder="e.g. John" />
+              <FieldLabel colors={colors}>Brand</FieldLabel>
+              <Input colors={colors} value={brand} onChangeText={setBrand} placeholder="e.g. Toyota" />
             </View>
             <View style={{ flex: 1 }}>
-              <FieldLabel colors={colors}>Last Name</FieldLabel>
-              <Input colors={colors} value={lastName} onChangeText={setLastName} placeholder="e.g. Peter" />
+              <FieldLabel colors={colors}>Model</FieldLabel>
+              <Input colors={colors} value={model} onChangeText={setModel} placeholder="e.g. Hiace" />
             </View>
           </View>
 
-          <FieldLabel colors={colors}>Username</FieldLabel>
+          <FieldLabel colors={colors}>Vehicle Type</FieldLabel>
+          <Dropdown colors={colors} open={typeOpen} setOpen={setTypeOpen} value={vehicleType} options={VEHICLE_TYPES} onSelect={setVehicleType} />
+
+          <FieldLabel colors={colors}>Plate Number</FieldLabel>
           <Input
             colors={colors}
-            value={username}
+            value={plateNumber}
             onChangeText={(v) => {
-              setUsername(v);
-              if (fieldErrors.username) setFieldErrors((f) => ({ ...f, username: undefined }));
+              setPlateNumber(v);
+              if (fieldErrors.plateNumber) setFieldErrors({});
             }}
-            placeholder="e.g. jpeter"
-            autoCapitalize="none"
+            placeholder="e.g. EDS-101-KY"
+            autoCapitalize="characters"
           />
-          {!!fieldErrors.username && <Text style={styles.errorText}>{fieldErrors.username}</Text>}
+          {!!fieldErrors.plateNumber && <Text style={styles.errorText}>{fieldErrors.plateNumber}</Text>}
 
-          <FieldLabel colors={colors}>Email</FieldLabel>
-          <Input
-            colors={colors}
-            value={email}
-            onChangeText={(v) => {
-              setEmail(v);
-              if (fieldErrors.email) setFieldErrors((f) => ({ ...f, email: undefined }));
-            }}
-            placeholder="name@kayora.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-          {!!fieldErrors.email && <Text style={styles.errorText}>{fieldErrors.email}</Text>}
+          <FieldLabel colors={colors}>Color</FieldLabel>
+          <Input colors={colors} value={color} onChangeText={setColor} placeholder="e.g. Kayora Blue" />
 
-          <FieldLabel colors={colors}>Phone Number</FieldLabel>
-          <Input colors={colors} value={phone} onChangeText={setPhone} placeholder="+234 800 000 0000" keyboardType="phone-pad" />
+          <FieldLabel colors={colors}>Engine Number</FieldLabel>
+          <Input colors={colors} value={engineNumber} onChangeText={setEngineNumber} placeholder="Optional" />
 
-          <FieldLabel colors={colors}>Temporary Password</FieldLabel>
-          <View style={styles.passwordRow}>
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-              placeholder="At least 8 characters"
-              placeholderTextColor={colors.muted}
-              style={[styles.input, { flex: 1, marginBottom: 0 }]}
-            />
-            <Pressable onPress={() => setShowPassword((v) => !v)} style={styles.eyeButton}>
-              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color={colors.muted} />
-            </Pressable>
-          </View>
-          <Text style={styles.helperText}>
-            The new administrator can change this after their first login.
-          </Text>
+          <FieldLabel colors={colors}>Chassis Number</FieldLabel>
+          <Input colors={colors} value={chassisNumber} onChangeText={setChassisNumber} placeholder="Optional" />
         </View>
       )}
 
-      {/* Step 2: Department */}
+      {/* Step 2: Photos */}
       {step === 1 && (
         <View>
-          <FieldLabel colors={colors}>Department</FieldLabel>
-          <Dropdown
-            colors={colors}
-            open={deptOpen}
-            setOpen={setDeptOpen}
-            value={department}
-            options={DEPARTMENTS}
-            onSelect={setDepartment}
-          />
-          <Text style={styles.helperText}>
-            Select the organizational department this administrator belongs to.
-          </Text>
+          <ImagePickerField colors={colors} label="Vehicle Photo" value={image} onChange={setImage} />
+          <ImagePickerField colors={colors} label="Registration Document" value={registrationImage} onChange={setRegistrationImage} />
+          <Text style={styles.helperText}>Both photos are optional and can be added later from the Edit screen.</Text>
         </View>
       )}
 
-      {/* Step 3: Role */}
+      {/* Step 3: Assign Driver */}
       {step === 2 && (
         <View>
-          <FieldLabel colors={colors}>Role</FieldLabel>
-          <Dropdown
-            colors={colors}
-            open={roleOpen}
-            setOpen={setRoleOpen}
-            value={role}
-            options={canAssignSuperAdmin ? ROLES : ROLES.filter((r) => r !== "Super Administrator")}
-            onSelect={(v) => setRole(v as Role)}
-          />
-          {!canAssignSuperAdmin && (
-            <Text style={styles.helperText}>
-              Only a Super Administrator can assign another Super Administrator.
-            </Text>
+          <Text style={styles.helperText}>Optionally assign this vehicle to a driver now, or leave it unassigned for later.</Text>
+          {driversLoading ? (
+            <View style={{ paddingVertical: 24, alignItems: "center" }}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : (
+            <View style={{ gap: 8, marginTop: 12 }}>
+              <Pressable
+                style={[styles.driverOptionRow, selectedDriverId === null && { borderColor: colors.primary }]}
+                onPress={() => setSelectedDriverId(null)}
+              >
+                <View style={styles.checkbox}>{selectedDriverId === null && <Ionicons name="checkmark" size={13} color={colors.primary} />}</View>
+                <Text style={styles.adminName}>Leave unassigned</Text>
+              </Pressable>
+              {drivers.map((d) => (
+                <Pressable
+                  key={d.id}
+                  style={[styles.driverOptionRow, selectedDriverId === d.id && { borderColor: colors.primary }]}
+                  onPress={() => setSelectedDriverId(d.id)}
+                >
+                  <View style={styles.checkbox}>{selectedDriverId === d.id && <Ionicons name="checkmark" size={13} color={colors.primary} />}</View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.adminName}>{d.name}</Text>
+                    <Text style={styles.helperText}>
+                      {d.driverId}
+                      {d.currentVehiclePlate ? ` · Currently on ${d.currentVehiclePlate}` : ""}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
           )}
         </View>
       )}
 
-      {/* Step 4: Permissions */}
+      {/* Step 4: Review */}
       {step === 3 && (
         <View>
-          {role === "Super Administrator" ? (
-            PERMISSION_GROUPS.map((group) => (
-              <View key={group.key} style={{ marginBottom: 14 }}>
-                <Text style={styles.permissionGroupTitle}>{group.label}</Text>
-                {group.permissions.map((perm) => {
-                  const checked = permissions.has(perm.key);
-                  return (
-                    <Pressable
-                      key={perm.key}
-                      style={styles.checkboxRow}
-                      onPress={() => togglePermission(perm.key)}
-                    >
-                      <View style={[styles.checkbox, checked && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                        {checked && <Ionicons name="checkmark" size={13} color="#FFFFFF" />}
-                      </View>
-                      <Text style={styles.checkboxLabel}>{perm.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ))
-          ) : (
-            <Text style={styles.helperText}>
-              Detailed permission selection is only available for the Super Administrator role.
-              Standard role-based permissions will apply automatically.
-            </Text>
-          )}
-        </View>
-      )}
-
-      {/* Step 5: Review */}
-      {step === 4 && (
-        <View>
-          <InfoRow colors={colors} label="Name" value={`${firstName} ${lastName}`} />
-          <InfoRow colors={colors} label="Username" value={`@${username}`} />
-          <InfoRow colors={colors} label="Email" value={email} />
-          <InfoRow colors={colors} label="Phone Number" value={phone || "—"} />
-          <InfoRow colors={colors} label="Department" value={department} />
-          <InfoRow colors={colors} label="Role" value={role} />
+          <InfoRow colors={colors} label="Vehicle" value={`${brand} ${model}`} />
+          <InfoRow colors={colors} label="Type" value={vehicleType} />
+          <InfoRow colors={colors} label="Plate Number" value={plateNumber} />
+          <InfoRow colors={colors} label="Color" value={color || "—"} />
+          <InfoRow colors={colors} label="Engine Number" value={engineNumber || "—"} />
+          <InfoRow colors={colors} label="Chassis Number" value={chassisNumber || "—"} />
           <InfoRow
             colors={colors}
-            label="Permissions"
-            value={role === "Super Administrator" ? `${permissions.size} selected` : "Role default"}
+            label="Assigned Driver"
+            value={selectedDriverId ? drivers.find((d) => d.id === selectedDriverId)?.name ?? "—" : "Unassigned"}
           />
           {!!submitError && <Text style={styles.errorText}>{submitError}</Text>}
         </View>
@@ -1487,29 +1075,317 @@ function AddAdminModal({
           </Pressable>
         )}
 
-        {step < 4 ? (
+        {step < 3 ? (
           <Pressable
-            style={[styles.primaryButton, step === 0 && !canGoNextFromPersonal && { opacity: 0.5 }]}
-            disabled={(step === 0 && !canGoNextFromPersonal) || checkingAvailability}
-            onPress={() => (step === 0 ? handleNextFromPersonal() : setStep((s) => s + 1))}
+            style={[styles.primaryButton, step === 0 && !canGoNextFromDetails && { opacity: 0.5 }]}
+            disabled={step === 0 && !canGoNextFromDetails}
+            onPress={() => setStep((s) => s + 1)}
           >
-            {checkingAvailability ? (
-              <ActivityIndicator color={"#FFFFFF"} size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Next</Text>
-            )}
+            <Text style={styles.primaryButtonText}>Next</Text>
           </Pressable>
         ) : (
           <Pressable style={styles.primaryButton} onPress={handleSubmit} disabled={submitting}>
-            {submitting ? (
-              <ActivityIndicator color={"#FFFFFF"} size="small" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Create Administrator</Text>
-            )}
+            {submitting ? <ActivityIndicator color={"#FFFFFF"} size="small" /> : <Text style={styles.primaryButtonText}>Add Vehicle</Text>}
           </Pressable>
         )}
       </View>
     </ModalShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+export default function ManageVehiclesScreen() {
+  const { palette: colors } = useTheme();
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
+  const styles = useMemo(() => localStyles(colors), [colors]);
+  const toast = useToast();
+
+  const [loading, setLoading] = useState(true);
+  const [vehicles, setVehicles] = useState<VehicleRecord[]>([]);
+  const [query, setQuery] = useState("");
+  const [statusTab, setStatusTab] = useState<"All" | VehicleStatus>("All");
+
+  const [viewTarget, setViewTarget] = useState<VehicleRecord | null>(null);
+  const [editTarget, setEditTarget] = useState<VehicleRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<VehicleRecord | null>(null);
+  const [assignTarget, setAssignTarget] = useState<VehicleRecord | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [assignBusy, setAssignBusy] = useState(false);
+
+  const loadVehicles = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await vehicleService.getVehicles(statusTab, query);
+      setVehicles(data);
+    } catch (e) {
+      toast.show("Could not load vehicles. Please try again.", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [statusTab, query, toast.show]);
+
+  useEffect(() => {
+    loadVehicles();
+  }, [statusTab]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      loadVehicles();
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const stats = useMemo(
+    () => ({
+      total: vehicles.length,
+      assigned: vehicles.filter((v) => v.status === "Assigned").length,
+      available: vehicles.filter((v) => v.status === "Available").length,
+    }),
+    [vehicles]
+  );
+
+  const handleCreate = async (payload: Partial<VehicleRecord> & { assignedDriverId?: string }) => {
+    const created = await vehicleService.createVehicle(payload);
+    setVehicles((prev) => [created, ...prev]);
+    setAddOpen(false);
+    toast.show("Vehicle added successfully.");
+  };
+
+  const handleSaveEdit = async (updated: VehicleRecord) => {
+    const saved = await vehicleService.updateVehicle(updated.id, updated);
+    setVehicles((prev) => prev.map((v) => (v.id === saved.id ? saved : v)));
+    setEditTarget(null);
+    toast.show("Vehicle updated successfully.");
+  };
+
+  const handleDeleteConfirmed = async (id: string) => {
+    await vehicleService.deleteVehicle(id);
+    setVehicles((prev) => prev.filter((v) => v.id !== id));
+    setDeleteTarget(null);
+    toast.show("Vehicle deleted successfully.");
+  };
+
+  const handleAssignFromView = async (driverId: string) => {
+    if (!viewTarget) return;
+    setAssignBusy(true);
+    try {
+      const updated = await vehicleService.assignVehicle(viewTarget.id, driverId);
+      setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+      setViewTarget(updated);
+      toast.show("Driver assigned successfully.");
+    } catch (e) {
+      toast.show(e instanceof ApiError ? e.message : "Could not assign this driver.", "error");
+    } finally {
+      setAssignBusy(false);
+    }
+  };
+
+  const handleUnassignFromView = async () => {
+    if (!viewTarget) return;
+    setAssignBusy(true);
+    try {
+      const updated = await vehicleService.unassignVehicle(viewTarget.id);
+      setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+      setViewTarget(updated);
+      toast.show("Driver unassigned.");
+    } catch (e) {
+      toast.show(e instanceof ApiError ? e.message : "Could not unassign this driver.", "error");
+    } finally {
+      setAssignBusy(false);
+    }
+  };
+
+  const handleAssignFromModal = async (driverId: string) => {
+    if (!assignTarget) return;
+    const updated = await vehicleService.assignVehicle(assignTarget.id, driverId);
+    setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+    setAssignTarget(null);
+    toast.show("Driver assigned successfully.");
+  };
+
+  return (
+    <AdminLayout title="Manage Vehicles">
+      <View style={styles.screen}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={[styles.headerRow, isMobile && styles.headerRowMobile]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.pageTitle}>Manage Vehicles</Text>
+              <Text style={styles.pageSubtitle}>Add, edit, and assign company vehicles to drivers.</Text>
+            </View>
+            <Pressable style={[styles.primaryButton, isMobile && styles.fullWidthButton]} onPress={() => setAddOpen(true)}>
+              <Ionicons name="add" size={18} color={"#FFFFFF"} />
+              <Text style={styles.primaryButtonText}>Add Vehicle</Text>
+            </Pressable>
+          </View>
+
+          <View style={[styles.statsRow, isMobile && styles.statsRowMobile]}>
+            <StatCard colors={colors} icon="car" label="Total Vehicles" value={stats.total} />
+            <StatCard colors={colors} icon="person" label="Assigned" value={stats.assigned} />
+            <StatCard colors={colors} icon="checkmark-circle" label="Unassigned" value={stats.available} />
+          </View>
+
+          <View style={styles.tabsRow}>
+            {STATUS_TABS.map((tab) => (
+              <Pressable key={tab.key} style={styles.tabButton} onPress={() => setStatusTab(tab.key)}>
+                <Text style={[styles.tabButtonText, statusTab === tab.key && styles.tabButtonTextActive]}>{tab.label}</Text>
+                {statusTab === tab.key && <View style={styles.tabUnderline} />}
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={[styles.toolbarRow, isMobile && styles.toolbarRowMobile]}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={18} color={colors.muted} />
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search vehicles..."
+                placeholderTextColor={colors.muted}
+                style={styles.searchInput}
+              />
+              {query.length > 0 && (
+                <Pressable onPress={() => setQuery("")}>
+                  <Ionicons name="close-circle" size={16} color={colors.muted} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+
+          {loading ? (
+            <View style={styles.card}>
+              {[...Array(4)].map((_, i) => (
+                <View key={i} style={styles.skeletonRow}>
+                  <SkeletonBlock colors={colors} width={40} height={40} style={{ borderRadius: 10 }} />
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <SkeletonBlock colors={colors} width="60%" height={12} />
+                    <SkeletonBlock colors={colors} width="40%" height={10} />
+                  </View>
+                  <SkeletonBlock colors={colors} width={70} height={22} style={{ borderRadius: 11 }} />
+                </View>
+              ))}
+            </View>
+          ) : vehicles.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="car-outline" size={48} color={colors.muted} />
+              <Text style={styles.emptyTitle}>No vehicles found.</Text>
+              <Text style={styles.emptySubtitle}>Add your first vehicle to get started.</Text>
+            </View>
+          ) : isMobile ? (
+            <View style={{ gap: 12 }}>
+              {vehicles.map((vehicle) => (
+                <VehicleCard
+                  key={vehicle.id}
+                  vehicle={vehicle}
+                  colors={colors}
+                  onView={() => setViewTarget(vehicle)}
+                  onEdit={() => setEditTarget(vehicle)}
+                  onDelete={() => setDeleteTarget(vehicle)}
+                />
+              ))}
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <View style={styles.tableHeaderRow}>
+                <Text style={[styles.tableHeaderCell, { flex: 2.2 }]}>Vehicle</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1.3 }]}>Type</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1 }]}>Status</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1.8 }]}>Assigned Driver</Text>
+                <Text style={[styles.tableHeaderCell, { flex: 1.3, textAlign: "right" }]}>Actions</Text>
+              </View>
+              {vehicles.map((vehicle) => (
+                <View key={vehicle.id} style={styles.tableRow}>
+                  <View style={[styles.adminCell, { flex: 2.2 }]}>
+                    <VehiclePhoto vehicle={vehicle} colors={colors} size={36} />
+                    <View>
+                      <Text style={styles.vehicleName}>
+                        {vehicle.brand} {vehicle.model}
+                      </Text>
+                      <Text style={styles.vehiclePlate}>{vehicle.plateNumber}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.tableCellText, { flex: 1.3 }]}>{vehicle.vehicleType}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Badge colors={colors} {...statusColor(colors, vehicle.status)} text={vehicle.status} />
+                  </View>
+                  <Text style={[styles.tableCellText, { flex: 1.8 }]}>{vehicle.assignedDriver?.name ?? "Unassigned"}</Text>
+                  <View style={[styles.actionsCell, { flex: 1.3 }]}>
+                    {vehicle.assignedDriver ? (
+                      <Pressable
+                        onPress={async () => {
+                          setAssignBusy(true);
+                          try {
+                            const updated = await vehicleService.unassignVehicle(vehicle.id);
+                            setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+                            toast.show("Driver unassigned.");
+                          } catch {
+                            toast.show("Could not unassign this vehicle.", "error");
+                          } finally {
+                            setAssignBusy(false);
+                          }
+                        }}
+                        style={styles.iconButton}
+                        disabled={assignBusy}
+                      >
+                        <Ionicons name="person-remove-outline" size={18} color={colors.warning ?? "#B7791F"} />
+                      </Pressable>
+                    ) : (
+                      <Pressable onPress={() => setAssignTarget(vehicle)} style={styles.iconButton}>
+                        <Ionicons name="person-add-outline" size={18} color={colors.primary} />
+                      </Pressable>
+                    )}
+                    <Pressable onPress={() => setViewTarget(vehicle)} style={styles.iconButton}>
+                      <Ionicons name="eye-outline" size={18} color={colors.muted} />
+                    </Pressable>
+                    <Pressable onPress={() => setEditTarget(vehicle)} style={styles.iconButton}>
+                      <Ionicons name="create-outline" size={18} color={colors.primary} />
+                    </Pressable>
+                    <Pressable onPress={() => setDeleteTarget(vehicle)} style={styles.iconButton}>
+                      <Ionicons name="trash-outline" size={18} color={colors.danger ?? "#D64545"} />
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+
+        <ToastView colors={colors} toast={toast} />
+
+        {viewTarget && (
+          <ViewVehicleModal
+            vehicle={viewTarget}
+            colors={colors}
+            isMobile={isMobile}
+            onClose={() => setViewTarget(null)}
+            onAssign={() => {
+              setAssignTarget(viewTarget);
+              setViewTarget(null);
+            }}
+            onUnassign={handleUnassignFromView}
+            busy={assignBusy}
+          />
+        )}
+
+        {editTarget && (
+          <EditVehicleModal vehicle={editTarget} colors={colors} isMobile={isMobile} onClose={() => setEditTarget(null)} onSave={handleSaveEdit} />
+        )}
+
+        {deleteTarget && (
+          <DeleteVehicleModal vehicle={deleteTarget} colors={colors} onClose={() => setDeleteTarget(null)} onConfirm={handleDeleteConfirmed} />
+        )}
+
+        {assignTarget && (
+          <AssignDriverModal colors={colors} isMobile={isMobile} onClose={() => setAssignTarget(null)} onConfirm={handleAssignFromModal} />
+        )}
+
+        {addOpen && <AddVehicleModal colors={colors} isMobile={isMobile} onClose={() => setAddOpen(false)} onCreate={handleCreate} />}
+      </View>
+    </AdminLayout>
   );
 }
 
@@ -1519,29 +1395,27 @@ function AddAdminModal({
 
 function localStyles(colors: any) {
   return StyleSheet.create({
-    screen: { flex: 1, backgroundColor: colors.background ?? "#F5F7FA" },
-    scrollContent: { padding: 20, paddingBottom: 40, gap: 16 },
-
-    headerRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 16 },
-    headerRowMobile: { flexDirection: "column" },
-    pageTitle: { fontSize: 22, fontWeight: "700", color: colors.text ?? "#101828" },
+    screen: { flex: 1 },
+    scrollContent: { padding: 20, paddingBottom: 60, gap: 16 },
+    headerRow: { flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 4 },
+    headerRowMobile: { flexDirection: "column", alignItems: "stretch", gap: 12 },
+    pageTitle: { fontSize: 22, fontWeight: "800", color: colors.text ?? "#101828" },
     pageSubtitle: { fontSize: 13, color: colors.muted, marginTop: 4 },
 
     primaryButton: {
       flexDirection: "row",
       alignItems: "center",
       gap: 6,
-      backgroundColor: colors.primary ?? "#0D4A8C",
-      paddingVertical: 10,
+      backgroundColor: colors.primary,
+      height: 44,
       paddingHorizontal: 16,
       borderRadius: 10,
-      justifyContent: "center",
     },
-    primaryButtonText: { color: "#FFFFFF", fontWeight: "600", fontSize: 14 },
-    fullWidthButton: { width: "100%" },
+    primaryButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
+    fullWidthButton: { justifyContent: "center" },
 
     secondaryButton: {
-      paddingVertical: 10,
+      height: 44,
       paddingHorizontal: 16,
       borderRadius: 10,
       borderWidth: 1,
@@ -1549,31 +1423,30 @@ function localStyles(colors: any) {
       alignItems: "center",
       justifyContent: "center",
     },
-    secondaryButtonText: { color: colors.text ?? "#101828", fontWeight: "600", fontSize: 14 },
+    secondaryButtonText: { color: colors.text ?? "#101828", fontSize: 14, fontWeight: "600" },
 
     dangerButton: {
-      backgroundColor: colors.danger ?? "#D64545",
-      paddingVertical: 10,
+      height: 44,
       paddingHorizontal: 16,
       borderRadius: 10,
+      backgroundColor: colors.danger ?? "#D64545",
       alignItems: "center",
       justifyContent: "center",
     },
-    dangerButtonText: { color: "#FFFFFF", fontWeight: "600", fontSize: 14 },
+    dangerButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
 
-    statsRow: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
+    statsRow: { flexDirection: "row", gap: 12 },
     statsRowMobile: { flexDirection: "column" },
     statCard: {
       flex: 1,
-      minWidth: 160,
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
       backgroundColor: colors.card,
       borderRadius: 14,
-      padding: 16,
       borderWidth: 1,
       borderColor: colors.border ?? "#E2E5EA",
+      padding: 16,
     },
     statIconWrap: {
       width: 40,
@@ -1583,29 +1456,27 @@ function localStyles(colors: any) {
       alignItems: "center",
       justifyContent: "center",
     },
-    statValue: { fontSize: 20, fontWeight: "700", color: colors.text ?? "#101828" },
+    statValue: { fontSize: 20, fontWeight: "800", color: colors.text ?? "#101828" },
     statLabel: { fontSize: 12, color: colors.muted },
 
-    toolbarRow: { flexDirection: "row", gap: 12, zIndex: 10 },
+    tabsRow: {
+      flexDirection: "row",
+      gap: 4,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border ?? "#E2E5EA",
+    },
+    tabButton: { paddingVertical: 10, paddingHorizontal: 14, alignItems: "center" },
+    tabButtonText: { fontSize: 13, fontWeight: "600", color: colors.muted },
+    tabButtonTextActive: { color: colors.primary },
+    tabUnderline: { height: 2, backgroundColor: colors.primary, marginTop: 8, width: "100%", borderRadius: 1 },
+
+    toolbarRow: { flexDirection: "row", gap: 10 },
     toolbarRowMobile: { flexDirection: "column" },
     searchBox: {
       flex: 1,
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
-      backgroundColor: colors.card,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border ?? "#E2E5EA",
-      paddingHorizontal: 12,
-      height: 44,
-    },
-    searchInput: { flex: 1, color: colors.text ?? "#101828", fontSize: 14 },
-
-    filterButton: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
       height: 44,
       paddingHorizontal: 14,
       borderRadius: 10,
@@ -1613,22 +1484,7 @@ function localStyles(colors: any) {
       borderColor: colors.border ?? "#E2E5EA",
       backgroundColor: colors.card,
     },
-    filterButtonText: { color: colors.text ?? "#101828", fontSize: 14, fontWeight: "500" },
-    filterDropdown: {
-      position: "absolute",
-      top: 48,
-      right: 0,
-      minWidth: 200,
-      backgroundColor: colors.card,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border ?? "#E2E5EA",
-      paddingVertical: 6,
-      zIndex: 20,
-      elevation: 6,
-    },
-    filterOption: { paddingVertical: 10, paddingHorizontal: 14 },
-    filterOptionText: { fontSize: 13, color: colors.text ?? "#101828" },
+    searchInput: { flex: 1, color: colors.text ?? "#101828", fontSize: 14 },
 
     card: {
       backgroundColor: colors.card,
@@ -1655,8 +1511,8 @@ function localStyles(colors: any) {
       borderBottomColor: colors.border ?? "#EEF0F3",
     },
     adminCell: { flexDirection: "row", alignItems: "center", gap: 10 },
-    adminName: { fontSize: 14, fontWeight: "600", color: colors.text ?? "#101828" },
-    adminUsername: { fontSize: 12, color: colors.muted },
+    vehicleName: { fontSize: 14, fontWeight: "600", color: colors.text ?? "#101828" },
+    vehiclePlate: { fontSize: 12, color: colors.muted },
     tableCellText: { fontSize: 13, color: colors.text ?? "#101828" },
     actionsCell: { flexDirection: "row", justifyContent: "flex-end", gap: 4 },
     iconButton: { padding: 6 },
@@ -1688,19 +1544,14 @@ function localStyles(colors: any) {
     mobileActionButton: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 10 },
     mobileActionText: { fontSize: 13, color: colors.muted, fontWeight: "600" },
 
-    avatarFallback: {
+    vehiclePhotoFallback: {
       backgroundColor: colors.primary + "1A",
       alignItems: "center",
       justifyContent: "center",
     },
-    avatarInitials: { color: colors.primary ?? "#0D4A8C", fontWeight: "700" },
 
     modalOverlay: { flex: 1, backgroundColor: "rgba(15, 23, 42, 0.5)", alignItems: "center", justifyContent: "center" },
-    modalCard: {
-      backgroundColor: colors.card,
-      borderRadius: 16,
-      overflow: "hidden",
-    },
+    modalCard: { backgroundColor: colors.card, borderRadius: 16, overflow: "hidden" },
     modalCardMobile: { width: "100%", height: "100%", borderRadius: 0 },
     modalHeader: {
       flexDirection: "row",
@@ -1750,15 +1601,6 @@ function localStyles(colors: any) {
     dropdownItem: { paddingVertical: 10, paddingHorizontal: 14 },
     dropdownItemText: { fontSize: 14, color: colors.text ?? "#101828" },
 
-    statusChip: {
-      paddingVertical: 8,
-      paddingHorizontal: 14,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.border ?? "#E2E5EA",
-    },
-    statusChipText: { fontSize: 13, color: colors.text ?? "#101828", fontWeight: "500" },
-
     infoRow: {
       flexDirection: "row",
       justifyContent: "space-between",
@@ -1780,8 +1622,6 @@ function localStyles(colors: any) {
       marginBottom: 12,
     },
     deleteWarning: { fontSize: 13, color: colors.muted, marginBottom: 14, lineHeight: 18 },
-    passwordRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-    eyeButton: { padding: 8 },
     errorText: { color: colors.danger ?? "#D64545", fontSize: 12, marginTop: 4 },
 
     stepRow: { flexDirection: "row", marginBottom: 18 },
@@ -1796,8 +1636,6 @@ function localStyles(colors: any) {
     stepDotText: { fontSize: 12, fontWeight: "700", color: colors.muted },
     stepLabel: { fontSize: 10, color: colors.muted, marginTop: 4, textAlign: "center" },
 
-    permissionGroupTitle: { fontSize: 13, fontWeight: "700", color: colors.text ?? "#101828", marginBottom: 8 },
-    checkboxRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
     checkbox: {
       width: 20,
       height: 20,
@@ -1807,21 +1645,53 @@ function localStyles(colors: any) {
       alignItems: "center",
       justifyContent: "center",
     },
-    checkboxLabel: { fontSize: 13, color: colors.text ?? "#101828" },
     helperText: { fontSize: 12, color: colors.muted, marginTop: 6, lineHeight: 17 },
 
-    centerFill: { flex: 1, alignItems: "center", justifyContent: "center" },
-    lockCircle: {
-      width: 84,
-      height: 84,
-      borderRadius: 42,
+    imagePickerBox: {
+      height: 140,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderStyle: "dashed",
+      borderColor: colors.border ?? "#C5CAD3",
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.background ?? "#FAFBFC",
+      overflow: "hidden",
+    },
+    imagePickerPreview: { width: "100%", height: "100%" },
+    documentPreview: { width: "100%", height: 200, borderRadius: 10, marginTop: 8, backgroundColor: colors.border ?? "#EEF0F3" },
+
+    assignedDriverCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      backgroundColor: colors.border + "30",
+      borderRadius: 12,
+      padding: 12,
+    },
+    assignedDriverAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       backgroundColor: colors.primary + "1A",
       alignItems: "center",
       justifyContent: "center",
-      marginBottom: 18,
     },
-    deniedTitle: { fontSize: 20, fontWeight: "700", color: colors.text ?? "#101828", marginBottom: 6 },
-    deniedSubtitle: { fontSize: 14, color: colors.muted, marginBottom: 24, textAlign: "center" },
+    avatarInitials: { color: colors.primary ?? "#0D4A8C", fontWeight: "700" },
+    unassignedRow: { alignItems: "flex-start", gap: 10 },
+
+    driverOptionRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      borderWidth: 1,
+      borderColor: colors.border ?? "#E2E5EA",
+      borderRadius: 10,
+      padding: 12,
+    },
+
+    adminName: { fontSize: 14, fontWeight: "600", color: colors.text ?? "#101828" },
+    adminUsername: { fontSize: 12, color: colors.muted },
 
     toast: {
       position: "absolute",

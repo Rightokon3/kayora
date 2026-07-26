@@ -1,0 +1,39 @@
+{
+  "cli": {
+    "version": ">= 20.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://kayorabackend-production.up.railway.app/api"
+      },
+      "channel": "development"
+    },
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      },
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://kayorabackend-production.up.railway.app/api"
+      },
+      "channel": "preview"
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://kayorabackend-production.up.railway.app/api"
+      },
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
