@@ -128,14 +128,29 @@ const vehicleService = {
   },
   async uploadImage(uri: string): Promise<string> {
     const formData = new FormData();
-    const filename = uri.split("/").pop() || "upload.jpg";
-    const match = /\.(\w+)$/.exec(filename);
-    const ext = match ? match[1] : "jpg";
-    formData.append("file", {
-      uri,
-      name: filename,
-      type: `image/${ext === "jpg" ? "jpeg" : ext}`,
-    } as any);
+
+    if (Platform.OS === "web") {
+      // On web, `uri` is a blob:/data: URL from expo-image-picker. The
+      // RN-only { uri, name, type } shape below gets coerced to the
+      // string "[object Object]" by the browser's FormData, which is
+      // why Laravel's `image`/`file` rules were rejecting the upload.
+      // Fetching the URI back into a real Blob gives the browser an
+      // actual file to send.
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const ext = blob.type?.split("/")[1] || "jpg";
+      formData.append("file", blob, `upload.${ext === "jpeg" ? "jpg" : ext}`);
+    } else {
+      const filename = uri.split("/").pop() || "upload.jpg";
+      const match = /\.(\w+)$/.exec(filename);
+      const ext = match ? match[1] : "jpg";
+      formData.append("file", {
+        uri,
+        name: filename,
+        type: `image/${ext === "jpg" ? "jpeg" : ext}`,
+      } as any);
+    }
+
     const result = await adminApiFetch<{ success: boolean; url: string }>("/admin/upload-image", {
       method: "POST",
       body: formData,
