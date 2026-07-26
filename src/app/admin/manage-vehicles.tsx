@@ -73,6 +73,63 @@ const STATUS_TABS: { key: "All" | VehicleStatus; label: string }[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Image extension / mime helpers — covers every common image format so
+// uploads aren't silently limited to jpg/png. Extend these two maps if a
+// new format ever needs supporting.
+// ---------------------------------------------------------------------------
+
+const MIME_TO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/pjpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+  "image/x-ms-bmp": "bmp",
+  "image/svg+xml": "svg",
+  "image/tiff": "tiff",
+  "image/x-tiff": "tiff",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/avif": "avif",
+  "image/x-icon": "ico",
+  "image/vnd.microsoft.icon": "ico",
+  "image/apng": "apng",
+};
+
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  svg: "image/svg+xml",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  heic: "image/heic",
+  heif: "image/heif",
+  avif: "image/avif",
+  ico: "image/x-icon",
+  apng: "image/apng",
+};
+
+function extensionFromMime(mimeType: string | undefined): string {
+  if (!mimeType) return "jpg";
+  return MIME_TO_EXT[mimeType.toLowerCase()] || mimeType.split("/")[1]?.split("+")[0] || "jpg";
+}
+
+function normalizeExt(ext: string): string {
+  const lower = ext.toLowerCase();
+  return EXT_TO_MIME[lower] ? lower : "jpg";
+}
+
+function mimeFromExt(ext: string): string {
+  return EXT_TO_MIME[ext.toLowerCase()] || "image/jpeg";
+}
+
+// ---------------------------------------------------------------------------
 // Backend-connected service layer
 // ---------------------------------------------------------------------------
 
@@ -138,16 +195,16 @@ const vehicleService = {
       // actual file to send.
       const response = await fetch(uri);
       const blob = await response.blob();
-      const ext = blob.type?.split("/")[1] || "jpg";
-      formData.append("file", blob, `upload.${ext === "jpeg" ? "jpg" : ext}`);
+      const ext = extensionFromMime(blob.type);
+      formData.append("file", blob, `upload.${ext}`);
     } else {
       const filename = uri.split("/").pop() || "upload.jpg";
-      const match = /\.(\w+)$/.exec(filename);
-      const ext = match ? match[1] : "jpg";
+      const rawExt = /\.(\w+)$/.exec(filename)?.[1]?.toLowerCase();
+      const ext = rawExt ? normalizeExt(rawExt) : "jpg";
       formData.append("file", {
         uri,
-        name: filename,
-        type: `image/${ext === "jpg" ? "jpeg" : ext}`,
+        name: `upload.${ext}`,
+        type: mimeFromExt(ext),
       } as any);
     }
 
@@ -465,7 +522,28 @@ function ImagePickerField({
       const url = await vehicleService.uploadImage(result.assets[0].uri);
       onChange(url);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not upload image. Please try again.");
+      // --- TEMPORARY DEBUG LOGGING — remove once the intermittent
+      // upload failure is diagnosed. Logs everything we can pull off
+      // the error so the real cause (validation message, HTTP status,
+      // network failure, etc.) shows up in the browser console instead
+      // of being swallowed by the generic fallback message below.
+      console.error("[ImageUpload] upload failed — raw error object:", e);
+      if (e instanceof ApiError) {
+        console.error("[ImageUpload] ApiError.message:", e.message);
+        console.error("[ImageUpload] ApiError.status:", (e as any).status);
+        console.error("[ImageUpload] ApiError.body/payload:", (e as any).body ?? (e as any).payload ?? (e as any).data);
+      } else if (e instanceof Error) {
+        console.error("[ImageUpload] Error name/message/stack:", e.name, e.message, e.stack);
+      }
+      // --- end temporary debug logging
+
+      const debugMessage =
+        e instanceof ApiError
+          ? `${e.message}${(e as any).status ? ` (status ${(e as any).status})` : ""}`
+          : e instanceof Error
+          ? e.message
+          : "Could not upload image. Please try again.";
+      setError(debugMessage); // TEMP: showing the raw message instead of a generic one
     } finally {
       setUploading(false);
     }
