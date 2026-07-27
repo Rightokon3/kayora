@@ -16,9 +16,19 @@ import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { ZoomIn } from "react-native-reanimated";
 import { Palette } from "../../contexts/ThemeContext";
-import { Product, ProductInput, ProductStatus, BOTTLE_SIZES, PRODUCT_STATUSES } from "../../types/product";
+import {
+  Product,
+  ProductInput,
+  ProductStatus,
+  ProductUsedFor,
+  ProductSpec,
+  ProductRegulatory,
+  BOTTLE_SIZES,
+  PRODUCT_STATUSES,
+} from "../../types/product";
 import { ImageUploader } from "./ImageUploader";
 import { SelectField } from "./SelectField";
+import { RepeatableFieldList, RepeatableRow } from "./RepeatableFieldList";
 
 const EMPTY_INPUT: ProductInput = {
   name: "",
@@ -28,7 +38,14 @@ const EMPTY_INPUT: ProductInput = {
   imageUri: null,
   available: true,
   status: "Active",
+  usedFor: [],
+  specs: [],
+  regulatory: [],
 };
+
+const EMPTY_USED_FOR_ROW: RepeatableRow = { title: "", description: "" };
+const EMPTY_SPEC_ROW: RepeatableRow = { label: "", value: "" };
+const EMPTY_REGULATORY_ROW: RepeatableRow = { label: "", value: "", description: "" };
 
 export function ProductModal({
   visible,
@@ -50,15 +67,27 @@ export function ProductModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  const [usedForRows, setUsedForRows] = useState<RepeatableRow[]>([]);
+  const [specRows, setSpecRows] = useState<RepeatableRow[]>([]);
+  const [regulatoryRows, setRegulatoryRows] = useState<RepeatableRow[]>([]);
+
   useEffect(() => {
     if (visible) {
       if (mode === "edit" && initialProduct) {
-        const { id, createdAt, ...rest } = initialProduct;
+        const { id, createdAt, usedFor, specs, regulatory, ...rest } = initialProduct;
         setForm(rest);
         setPriceText(String(initialProduct.price));
+        setUsedForRows((usedFor ?? []).map((u) => ({ title: u.title, description: u.description })));
+        setSpecRows((specs ?? []).map((s) => ({ label: s.label, value: s.value })));
+        setRegulatoryRows(
+          (regulatory ?? []).map((r) => ({ label: r.label, value: r.value, description: r.description ?? "" }))
+        );
       } else {
         setForm(EMPTY_INPUT);
         setPriceText("0");
+        setUsedForRows([]);
+        setSpecRows([]);
+        setRegulatoryRows([]);
       }
       setErrors({});
     }
@@ -83,11 +112,29 @@ export function ProductModal({
     return Object.keys(nextErrors).length === 0;
   };
 
+  // Drop rows the admin left completely blank rather than saving empty entries.
+  const nonBlankRows = (rows: RepeatableRow[]) =>
+    rows.filter((row) => Object.values(row).some((v) => v.trim().length > 0));
+
   const handleSave = async () => {
     if (!validate() || saving) return;
     setSaving(true);
     try {
-      await onSubmit(form);
+      const usedFor: ProductUsedFor[] = nonBlankRows(usedForRows).map((r) => ({
+        title: r.title ?? "",
+        description: r.description ?? "",
+      }));
+      const specs: ProductSpec[] = nonBlankRows(specRows).map((r) => ({
+        label: r.label ?? "",
+        value: r.value ?? "",
+      }));
+      const regulatory: ProductRegulatory[] = nonBlankRows(regulatoryRows).map((r) => ({
+        label: r.label ?? "",
+        value: r.value ?? "",
+        description: r.description || undefined,
+      }));
+
+      await onSubmit({ ...form, usedFor, specs, regulatory });
     } finally {
       setSaving(false);
     }
@@ -175,6 +222,61 @@ export function ProductModal({
               <FieldLabel palette={palette} text="Product Image" style={{ marginTop: 16 }} />
               <ImageUploader palette={palette} imageUri={form.imageUri} onChange={(uri) => updateField("imageUri", uri)} />
 
+              <SectionDivider palette={palette} />
+
+              <FieldLabel palette={palette} text="Best Used For" />
+              <Text style={[styles.sectionHint, { color: palette.muted }]}>
+                Shown as cards on the product page (e.g. "Weddings & Naming Ceremonies").
+              </Text>
+              <RepeatableFieldList
+                palette={palette}
+                rows={usedForRows}
+                onChange={setUsedForRows}
+                emptyRow={EMPTY_USED_FOR_ROW}
+                addLabel="Add use case"
+                fields={[
+                  { key: "title", placeholder: "e.g. Weddings & Naming Ceremonies" },
+                  { key: "description", placeholder: "e.g. The right size for service at tables...", multiline: true },
+                ]}
+              />
+
+              <SectionDivider palette={palette} />
+
+              <FieldLabel palette={palette} text="Product Specifications" />
+              <Text style={[styles.sectionHint, { color: palette.muted }]}>
+                e.g. Volume, Material, Packaging, Cap, Purification, Storage.
+              </Text>
+              <RepeatableFieldList
+                palette={palette}
+                rows={specRows}
+                onChange={setSpecRows}
+                emptyRow={EMPTY_SPEC_ROW}
+                addLabel="Add specification"
+                fields={[
+                  { key: "label", placeholder: "e.g. Volume" },
+                  { key: "value", placeholder: "e.g. 30cl (300ml)" },
+                ]}
+              />
+
+              <SectionDivider palette={palette} />
+
+              <FieldLabel palette={palette} text="Regulatory Status" />
+              <Text style={[styles.sectionHint, { color: palette.muted }]}>
+                e.g. NAFDAC Registration, SON MANCAP Registration.
+              </Text>
+              <RepeatableFieldList
+                palette={palette}
+                rows={regulatoryRows}
+                onChange={setRegulatoryRows}
+                emptyRow={EMPTY_REGULATORY_ROW}
+                addLabel="Add registration"
+                fields={[
+                  { key: "label", placeholder: "e.g. NAFDAC Registration" },
+                  { key: "value", placeholder: "e.g. A1-111026" },
+                  { key: "description", placeholder: "e.g. National Agency for Food and Drug Administration and Control", multiline: true },
+                ]}
+              />
+
               <View style={styles.rowBetween}>
                 <View>
                   <FieldLabel palette={palette} text="Availability" />
@@ -229,6 +331,10 @@ function ErrorText({ text, palette }: { text: string; palette: Palette }) {
   return <Text style={[styles.errorText, { color: palette.danger }]}>{text}</Text>;
 }
 
+function SectionDivider({ palette }: { palette: Palette }) {
+  return <View style={[styles.sectionDivider, { backgroundColor: palette.border }]} />;
+}
+
 const styles = StyleSheet.create({
   overlay: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
   modalCard: { width: "100%", maxWidth: 480, maxHeight: "88%", borderRadius: 24, padding: 22 },
@@ -240,6 +346,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 12.5, fontWeight: "700", marginBottom: 8 },
   helperText: { fontSize: 11.5, marginTop: 2 },
   errorText: { fontSize: 11.5, fontWeight: "600", marginTop: 6 },
+  sectionHint: { fontSize: 11.5, marginTop: -4, marginBottom: 10 },
+  sectionDivider: { height: 1, marginVertical: 20 },
 
   input: { height: 48, borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 14, fontSize: 14 },
   textarea: { height: 96, borderRadius: 12, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14 },

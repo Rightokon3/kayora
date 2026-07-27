@@ -15,6 +15,26 @@ export const PRODUCT_STATUSES = ["Active", "Out of Stock", "Draft"] as const;
 
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
+/** One "Best Used For" card on the product detail page. */
+export interface ProductUsedFor {
+  title: string;
+  description: string;
+}
+
+/** One row under "Product Specifications" (Volume, Material, Packaging, etc). */
+export interface ProductSpec {
+  label: string;
+  value: string;
+}
+
+/** One registration card under "Regulatory Status" (NAFDAC, SON MANCAP, etc).
+ *  `description` holds the issuing-body name shown under the number. */
+export interface ProductRegulatory {
+  label: string;
+  value: string;
+  description?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -25,6 +45,9 @@ export interface Product {
   available: boolean;
   status: ProductStatus;
   createdAt: string;
+  usedFor: ProductUsedFor[];
+  specs: ProductSpec[];
+  regulatory: ProductRegulatory[];
 }
 
 export interface ProductInput {
@@ -35,4 +58,7 @@ export interface ProductInput {
   imageUri: string | null;
   available: boolean;
   status: ProductStatus;
+  usedFor: ProductUsedFor[];
+  specs: ProductSpec[];
+  regulatory: ProductRegulatory[];
 }
