@@ -35,7 +35,14 @@
         }
       ],
       "expo-secure-store",
-      "@maplibre/maplibre-react-native"
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Kayora Admin to access your photos to upload images.",
+          "cameraPermission": "Allow Kayora Admin to access your camera to take photos."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

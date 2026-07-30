@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 
 import { useTheme } from "../../contexts/ThemeContext";
 import { adminApiFetch, ApiError } from "../../services/adminApi";
@@ -519,7 +520,18 @@ function ImagePickerField({
 
     setUploading(true);
     try {
-      const url = await vehicleService.uploadImage(result.assets[0].uri);
+      // expo-image-picker's `quality` option only takes effect when the
+      // picker re-encodes the file (which normally requires
+      // allowsEditing). Without that, it frequently returns the original,
+      // untouched photo — routinely 8-15MB on a modern phone, well over
+      // the backend's 5MB limit. Resizing/compressing here guarantees a
+      // small file regardless of what the picker handed back.
+      const manipulated = await ImageManipulator.manipulateAsync(
+        result.assets[0].uri,
+        [{ resize: { width: 1600 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      const url = await vehicleService.uploadImage(manipulated.uri);
       onChange(url);
     } catch (e) {
       // --- TEMPORARY DEBUG LOGGING — remove once the intermittent
@@ -531,15 +543,19 @@ function ImagePickerField({
       if (e instanceof ApiError) {
         console.error("[ImageUpload] ApiError.message:", e.message);
         console.error("[ImageUpload] ApiError.status:", (e as any).status);
-        console.error("[ImageUpload] ApiError.body/payload:", (e as any).body ?? (e as any).payload ?? (e as any).data);
+        console.error("[ImageUpload] ApiError.errors:", (e as any).errors);
       } else if (e instanceof Error) {
         console.error("[ImageUpload] Error name/message/stack:", e.name, e.message, e.stack);
       }
       // --- end temporary debug logging
 
+      // Laravel puts the actually-useful reason (e.g. "The file must not
+      // be greater than 5120 kilobytes") under errors.file, not message —
+      // message is just the generic "Validation failed (debug mode)"
+      // wrapper. Prefer the field-level message when it's there.
       const debugMessage =
         e instanceof ApiError
-          ? `${e.message}${(e as any).status ? ` (status ${(e as any).status})` : ""}`
+          ? `${e.errors?.file?.[0] ?? e.message}${(e as any).status ? ` (status ${(e as any).status})` : ""}`
           : e instanceof Error
           ? e.message
           : "Could not upload image. Please try again.";
