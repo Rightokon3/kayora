@@ -38,7 +38,7 @@ const storage = {
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL ??
-  "https://kayorabackend-production.up.railway.app/api";
+  "https://kayorabackend-production-f817.up.railway.app/api";
 
 const TOKEN_KEY = "kayora_admin_token";
 const TOKEN_EXPIRY_KEY = "kayora_admin_token_expiry";
